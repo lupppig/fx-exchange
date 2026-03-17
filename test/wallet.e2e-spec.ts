@@ -99,7 +99,7 @@ describe('WalletFlow (e2e)', () => {
   it('/api/v1/wallet/fund (POST) - Idempotent success', async () => {
     const idemKey = `idem-${Date.now()}`;
     
-    // Call 1
+
     const res1 = await request(app.getHttpServer())
       .post('/api/v1/wallet/fund')
       .set('Authorization', `Bearer ${user1Token}`)
@@ -110,7 +110,7 @@ describe('WalletFlow (e2e)', () => {
     expect(res1.body.data.message).toBe('Wallet funded successfully');
     expect(Number(res1.body.data.transaction.balanceAfter)).toBe(100);
 
-    // Call 2 (Duplicate)
+
     const res2 = await request(app.getHttpServer())
       .post('/api/v1/wallet/fund')
       .set('Authorization', `Bearer ${user1Token}`)

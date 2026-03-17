@@ -53,7 +53,44 @@ describe('AuthFlow (e2e)', () => {
       });
   });
 
-  // Since we don't have the OTP in this test environment without reading redis,
-  // we'll explicitly update the DB in another test suite (wallet.e2e-spec.ts)
-  // to get a valid token. This suite just ensures the endpoints are wired up.
+  it('/api/v1/auth/verify (POST) - correct OTP should verify', async () => {
+    // Read the user ID from the database
+    const { DataSource } = require('typeorm');
+    const { User } = require('../src/users/user.entity');
+    const dataSource = app.get(DataSource);
+    const user = await dataSource.getRepository(User).findOneBy({ email: testEmail });
+    expect(user).toBeDefined();
+
+    // The OTP keys use user.id, not email!
+    const { getRedisConnectionToken } = require('@nestjs-modules/ioredis');
+    const redis = app.get(getRedisConnectionToken('default'));
+    const bcrypt = require('bcrypt');
+    const knownOtp = '123456';
+    const newHash = await bcrypt.hash(knownOtp, 10);
+    
+    // Set known OTP hash
+    await redis.set(`otp:${user.id}`, newHash, 'EX', 600);
+    await redis.set(`otp:attempts:${user.id}`, 0, 'EX', 900);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/verify')
+      .send({ email: testEmail, otp: knownOtp });
+    
+    if (res.status !== 200) console.log('Verify Error:', res.body);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.message).toBe('Email verified successfully');
+  });
+
+  it('/api/v1/auth/signin (POST) - verified success', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/signin')
+      .send({ email: testEmail, password: plainPassword });
+      
+    if (res.status !== 200) console.log('Signin Error:', res.body);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.access_token).toBeDefined();
+    jwtToken = res.body.data.access_token;
+  });
 });
