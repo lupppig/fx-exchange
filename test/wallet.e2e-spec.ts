@@ -122,4 +122,55 @@ describe('WalletFlow (e2e)', () => {
     // Balance should remain 100, not 200
     expect(Number(res2.body.data.transaction.balanceAfter)).toBe(100);
   });
+
+  it('/api/v1/wallet/fund (POST) - Concurrency edge case (Promise.all) - double spend prevention', async () => {
+    // Attempt 5 simultaneous fund requests with DIFFERENT idempotency keys 
+    // to simulate a burst of unique valid transactions (e.g. race condition).
+    // In PostgreSQL SERIALIZABLE isolation, concurrent transactions conflicting on the same row 
+    // will serialize properly, and some may wait or retry, resulting in a consistent sum.
+    // However, since we are doing 5 parallel requests on the same wallet row, 
+    // some might throw a PostgreSQL serialization failure (code 40001). 
+    // Our goal is to ensure the final balance strictly matches the successful queries!
+    
+    // First, let's get the starting balance
+    const walletBefore = await request(app.getHttpServer())
+      .get('/api/v1/wallet')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .expect(200);
+      
+    const startBalanceEur = Number(walletBefore.body.data.balances.find((b: any) => b.currency === 'EUR')?.amount || 0);
+
+    const promises = [];
+    for (let i = 0; i < 5; i++) {
+      promises.push(
+        request(app.getHttpServer())
+          .post('/api/v1/wallet/fund')
+          .set('Authorization', `Bearer ${user1Token}`)
+          .set('x-idempotency-key', `idem-concurrent-eur-${Date.now()}-${i}`)
+          .send({ currency: 'EUR', amount: 100 })
+      );
+    }
+    
+    const results = await Promise.all(promises);
+    
+    // Count successful 200 responses
+    let successCount = 0;
+    for (const res of results) {
+      if (res.status === 200 && res.body.success === true) {
+        successCount++;
+      }
+    }
+
+    // Now check the final balance
+    const walletAfter = await request(app.getHttpServer())
+      .get('/api/v1/wallet')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .expect(200);
+
+    const finalBalanceEur = Number(walletAfter.body.data.balances.find((b: any) => b.currency === 'EUR').amount);
+    
+    // The final balance should EXACTLY equal Start + (100 * Successful Transactions)
+    // Serialization locks prevent dirty reads or race condition double credits.
+    expect(finalBalanceEur).toBe(startBalanceEur + (100 * successCount));
+  });
 });
