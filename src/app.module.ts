@@ -11,6 +11,7 @@ import { HealthModule } from './health/health.module.js';
 import { UsersModule } from './users/users.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { WalletModule } from './wallet/wallet.module.js';
+import { FxModule } from './fx/fx.module.js';
 import { User } from './users/user.entity.js';
 
 @Module({
@@ -75,6 +76,7 @@ import { User } from './users/user.entity.js';
     UsersModule,
     AuthModule,
     WalletModule,
+    FxModule,
   ],
 })
 export class AppModule {}
