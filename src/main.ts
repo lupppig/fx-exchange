@@ -54,9 +54,8 @@ async function bootstrap() {
   SwaggerModule.setup(`${globalPrefix}/docs`, app, document);
 
   const port = configService.get<number>('PORT') || 3000;
-  const appUrl = configService.get<string>('APP_URL') || `http://localhost:${port}`;
 
   await app.listen(port);
-  console.log(`Application is running on: ${appUrl}/${globalPrefix}`);
+  console.log(`Application is running on port: ${port}`);
 }
 bootstrap();
