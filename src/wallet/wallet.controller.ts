@@ -71,7 +71,28 @@ export class WalletController {
     required: true,
   })
   @ApiResponse({ status: HttpStatus.OK, description: 'Currency converted successfully.' })
-  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Insufficient balance or invalid currency pair.' })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Insufficient balance, invalid currency pair, or amount too small.',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'string', example: 'Insufficient USD balance' },
+        error: { type: 'string', example: 'INSUFFICIENT_BALANCE' },
+        details: {
+          type: 'object',
+          properties: {
+            currency: { type: 'string', example: 'USD' },
+            available: { type: 'number', example: 100000 },
+            requested: { type: 'number', example: 200000 },
+            shortfall: { type: 'number', example: 100000 },
+          },
+        },
+      },
+    },
+  })
   async convert(
     @CurrentUser('sub') userId: string,
     @Headers('x-idempotency-key') idempotencyKey: string,
@@ -102,7 +123,28 @@ export class WalletController {
     required: true,
   })
   @ApiResponse({ status: HttpStatus.OK, description: 'Trade executed successfully.' })
-  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Insufficient balance or invalid currency pair.' })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Insufficient balance, invalid currency pair, or amount too small.',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'string', example: 'Insufficient USD balance' },
+        error: { type: 'string', example: 'INSUFFICIENT_BALANCE' },
+        details: {
+          type: 'object',
+          properties: {
+            currency: { type: 'string', example: 'USD' },
+            available: { type: 'number', example: 100000 },
+            requested: { type: 'number', example: 200000 },
+            shortfall: { type: 'number', example: 100000 },
+          },
+        },
+      },
+    },
+  })
   async trade(
     @CurrentUser('sub') userId: string,
     @Headers('x-idempotency-key') idempotencyKey: string,
@@ -159,10 +201,6 @@ export class WalletController {
     @CurrentUser('sub') userId: string,
     @Query() query: GetTransactionsDto,
   ) {
-    const data = await this.walletService.getTransactions(userId, query.cursor, query.limit);
-    return {
-      success: true,
-      data,
-    };
+    return this.walletService.getTransactions(userId, query.cursor, query.limit);
   }
 }

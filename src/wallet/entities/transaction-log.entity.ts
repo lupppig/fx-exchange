@@ -5,12 +5,16 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Check,
 } from 'typeorm';
 import { TransactionType } from '../enums/transaction-type.enum.js';
 import { TransactionPurpose } from '../enums/transaction-purpose.enum.js';
 import { TransactionStatus } from '../enums/transaction-status.enum.js';
 
 @Entity('transaction_logs')
+@Check(`"amount" > 0`)
+@Check(`"balanceBefore" >= 0`)
+@Check(`"balanceAfter" >= 0`)
 export class TransactionLog {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

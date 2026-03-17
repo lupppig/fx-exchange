@@ -5,6 +5,7 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import { Redis } from 'ioredis';
 import { firstValueFrom } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
+import axiosRetry from 'axios-retry';
 
 interface FxRateResponse {
   result: string;
@@ -35,6 +36,17 @@ export class FxService {
     @InjectRedis() private readonly redis: Redis,
   ) {
     this.apiKey = this.configService.get<string>('EXCHANGE_RATE_API_KEY', '');
+    
+    axiosRetry(this.httpService.axiosRef, {
+      retries: 3,
+      retryDelay: axiosRetry.exponentialDelay,
+      retryCondition: (error) => {
+        return axiosRetry.isNetworkOrIdempotentRequestError(error) || error.response?.status === 429 || error.response?.status! >= 500;
+      },
+      onRetry: (retryCount, error) => {
+        this.logger.warn(`Retrying FX API call... attempt ${retryCount} after error: ${error.message}`);
+      },
+    });
   }
 
   async getRates(): Promise<VersionedRates> {

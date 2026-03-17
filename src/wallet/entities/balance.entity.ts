@@ -7,11 +7,13 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   JoinColumn,
+  Check,
 } from 'typeorm';
 import { Wallet } from './wallet.entity.js';
 
 @Entity('balances')
 @Unique(['walletId', 'currency'])
+@Check(`"amount" >= 0`)
 export class Balance {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

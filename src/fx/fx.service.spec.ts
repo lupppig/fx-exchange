@@ -21,7 +21,10 @@ describe('FxService', () => {
         FxService,
         {
           provide: HttpService,
-          useValue: { get: jest.fn() },
+          useValue: { 
+            get: jest.fn(),
+            axiosRef: { interceptors: { request: { use: jest.fn() }, response: { use: jest.fn() } } }
+          },
         },
         {
           provide: ConfigService,

@@ -209,9 +209,17 @@ export class WalletService {
         .getOne();
 
       if (!fromBalance || Number(fromBalance.amount) < amount) {
-        throw new BadRequestException(
-          `Insufficient ${from} balance. Available: ${fromBalance ? fromBalance.amount : 0}`,
-        );
+        const available = fromBalance ? Number(fromBalance.amount) : 0;
+        throw new BadRequestException({
+          message: `Insufficient ${from} balance`,
+          error: 'INSUFFICIENT_BALANCE',
+          details: {
+            currency: from,
+            available,
+            requested: amount,
+            shortfall: amount - available,
+          },
+        });
       }
 
       let toBalance = await queryRunner.manager

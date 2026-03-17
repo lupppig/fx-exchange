@@ -4,8 +4,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class GetTransactionsDto {
   @ApiPropertyOptional({
-    description: 'Cursor for pagination (ISO timestamp of last item from previous page)',
-    example: '2026-03-17T12:00:00.000Z',
+    description: 'Cursor for pagination (ISO timestamp of last item from previous page). Leave empty for the first page.',
   })
   @IsOptional()
   @IsString()
