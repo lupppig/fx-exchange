@@ -13,7 +13,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register a new user',
     description:
-      'Creates a new inactive user account and triggers an OTP verification email. Returns a message indicating the email has been sent.',
+      'Creates a new user account and triggers an OTP verification email. Returns a message indicating the email has been sent.',
   })
   @ApiResponse({
     status: HttpStatus.ACCEPTED,
@@ -41,15 +41,7 @@ export class AuthController {
         success: { type: 'boolean', example: false },
         statusCode: { type: 'number', example: 400 },
         timestamp: { type: 'string', example: '2026-03-17T10:44:27Z' },
-        path: { type: 'string', example: '/api/v1/auth/register' },
-        error: {
-          type: 'object',
-          properties: {
-            message: { type: 'string', example: 'Email already exists' },
-            error: { type: 'string', example: 'Bad Request' },
-            statusCode: { type: 'number', example: 400 },
-          },
-        },
+        message: { type: 'string', example: 'Email already exists' },
       },
     },
   })
@@ -62,20 +54,15 @@ export class AuthController {
         success: { type: 'boolean', example: false },
         statusCode: { type: 'number', example: 422 },
         timestamp: { type: 'string', example: '2026-03-17T10:44:27Z' },
-        path: { type: 'string', example: '/api/v1/auth/register' },
-        error: {
+        errors: {
           type: 'object',
           properties: {
-            message: {
-              type: 'array',
-              items: { type: 'string' },
-              example: [
+            password: {
+              type: 'string',
+              example:
                 'Password is too weak. It must contain at least one uppercase letter, one lowercase letter, one number and one special character.',
-                'email must be an email',
-              ],
             },
-            error: { type: 'string', example: 'Unprocessable Entity' },
-            statusCode: { type: 'number', example: 422 },
+            email: { type: 'string', example: 'email must be an email' },
           },
         },
       },

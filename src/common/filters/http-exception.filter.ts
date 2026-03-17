@@ -28,17 +28,26 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getResponse()
         : 'Internal server error';
 
-    const responseBody = {
+    const responseBody: any = {
       success: false,
       statusCode: httpStatus,
       timestamp: new Date().toISOString(),
-      path: httpAdapter.getRequestUrl(ctx.getRequest()),
-      error: typeof message === 'object' ? message : { message },
     };
+
+    if (typeof message === 'object' && message !== null) {
+      const { statusCode, error, message: msg, ...rest } = message as any;
+      if (rest.errors) {
+        responseBody.errors = rest.errors;
+      } else {
+        responseBody.message = msg || error || 'An error occurred';
+      }
+    } else {
+      responseBody.message = message;
+    }
 
     if (httpStatus >= 500) {
       this.logger.error(
-        `Exception occurred at ${responseBody.path}`,
+        `Exception occurred at ${httpAdapter.getRequestUrl(ctx.getRequest())}`,
         exception instanceof Error ? exception.stack : JSON.stringify(exception),
       );
     }
