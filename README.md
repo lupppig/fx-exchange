@@ -1,130 +1,288 @@
-# FX Exchange API
+# FX Exchange System — Case Study
 
-A high-performance currency exchange and wallet management service built with NestJS. This application provides a production-ready solution for managing multi-currency balances, real-time rate discovery, and atomic financial conversions.
+## Overview
 
-## System Architecture
+This project is a **production-grade FX exchange and wallet system** designed to handle **high-concurrency financial transactions** with strict guarantees around **consistency, correctness, and auditability**.
 
-The application follows a modular monolith approach, ensuring a clean separation of concerns between authentication, wallet operations, and foreign exchange logic.
+Unlike basic CRUD systems, this platform was built with the mindset that:
 
-### Technical Stack
-* **Framework**: NestJS (Node.js)
-* **Database**: PostgreSQL with TypeORM
-* **Caching**: Redis
-* **Task Queue**: BullMQ
-* **Security**: JWT Authentication and OTP Verification
-
-### Component Interaction Flow
-
-```mermaid
-graph TD
-    User([User Client]) --> LB[Load Balancer]
-    LB --> API[API Instance]
-    
-    subgraph Service Layer
-        API --> Auth[Auth Module]
-        API --> Wallet[Wallet Module]
-        API --> FX[FX Module]
-    end
-    
-    subgraph Data Layer
-        FX --> Redis[(Redis Cache)]
-        Auth --> Redis
-        Wallet --> Postgres[(PostgreSQL)]
-    end
-    
-    subgraph Async Processing
-        Auth --> Queue[BullMQ]
-        Queue --> Mailer[Mail Worker]
-    end
-    
-    FX -.-> Provider[External FX API]
-```
+> **“Money must never be created, lost, or duplicated — even under failure.”**
 
 ---
 
-## Core Functionality
+# Problem Statement
 
-### Authentication and Onboarding
-Registration is secured via an email-based One-Time Password (OTP) system. Upon successful verification, users are issued a JWT for session management. This ensures that only verified users can access financial endpoints.
+Design a system that allows users to:
 
-### Wallet and Balance Management
-The system utilizes a wallet-per-user model, where a single wallet contains multiple distinct balances isolated by currency (e.g., USD, EUR, NGN). All balance updates are performed using pessimistic row-level locking to ensure total consistency during concurrent operations.
-
-### Atomic Currency Conversion
-The FX engine performs conversions as atomic transactions. When a user swaps currencies, the system debits the source balance and credits the target balance within a single database transaction. This prevents "partial success" scenarios and ensures the total value of assets remains consistent.
+* Hold balances in multiple currencies
+* Convert between currencies using real-time FX rates
+* Perform operations safely under high concurrency
+* Scale to **millions of users**
 
 ---
 
-## Production Guarantees
+# Key Design Decisions
 
-### Financial Integrity
-* **Optimized Isolation**: The system uses the **READ COMMITTED** isolation level combined with explicit row-level locking (**FOR UPDATE**) to provide the best balance between performance and consistency.
-* **Pessimistic Locking**: Row-level locks are acquired on balances during updates to prevent race conditions and ensure data integrity in high-concurrency environments.
-* **Idempotency**: All write operations (funding, conversion) require a client-provided idempotency key, preventing duplicate processing of the same transaction.
+## 1. Modular Monolith (Instead of Microservices)
 
-### Resilience and Safety
-* **FX Rate Fallback**: Real-time rates are cached in Redis. In the event of an external provider failure, the system automatically falls back to the last known good rates to maintain service availability.
-* **Auditability**: Every balance change is recorded in an immutable transaction log, providing a complete audit trail for reconciliation.
+### Why:
 
----
+* Faster development and iteration
+* Easier debugging
+* Avoid premature distributed complexity
 
-## Scaling Strategy
+### Tradeoff:
 
-The application is designed to scale horizontally across every layer of the stack.
+* Less independent scaling per service
 
-### Scaling Architecture
+### Future Path:
 
-```mermaid
-graph LR
-    User([Users]) --> LB[Load Balancer]
-    
-    subgraph "Application Scale"
-        LB --> App1[App Instance 1]
-        LB --> App2[App Instance N]
-    end
-    
-    subgraph "State & Cache Scale"
-        App1 & App2 --> RedisCl[Redis Cluster]
-        App1 & App2 --> PG[(Postgres Master)]
-        PG -.-> PGR[Postgres Read Replicas]
-    end
-    
-    subgraph "Worker Scale"
-        RedisCl --> W1[Worker Instance 1]
-        RedisCl --> W2[Worker Instance N]
-    end
-```
-
-### Strategic Path to Scale
-* **Stateless API**: Application instances carry no local state, allowing them to be scaled up or down behind a load balancer without impact.
-* **Database Optimization**: The system is ready for read-replicas to offload heavy query traffic (like transaction history) from the master node.
-* **Distributed Queues**: Using BullMQ with Redis enables horizontal scaling of background workers to handle massive volumes of asynchronous tasks.
-* **Connection Management**: Active pooling ensures efficient use of database resources as the number of application instances increases.
+* FX service and Ledger system can be extracted into microservices when needed
 
 ---
 
-## Getting Started
+## 2. READ COMMITTED + Row-Level Locking (Not SERIALIZABLE)
 
-### Prerequisites
-* Node.js (v18+)
-* Docker and Docker Compose
+### Decision:
 
-### Quick Start
-The easiest way to start the development environment is using the provided script:
+Use:
 
-```bash
-./scripts/dev.sh
-```
+* `READ COMMITTED`
+* `SELECT ... FOR UPDATE`
 
-### API Documentation
-Once the service is running, interactive Swagger documentation is available at:
-[http://localhost:3000/api/docs](http://localhost:3000/api/docs)
+### Why:
+
+* Prevents race conditions
+* Avoids performance bottlenecks of SERIALIZABLE
+* Scales better under high concurrency
+
+### Tradeoff:
+
+* Requires careful locking discipline
 
 ---
 
-## Testing
-The codebase maintains high stability through rigorous unit and integration testing:
-```bash
-npm run test        # Unit tests
-npm run test:e2e    # E2E test suite
-```
+## 3. Double-Entry Ledger (Instead of Direct Balance Trust)
+
+### Decision:
+
+Balances are derived from an **immutable ledger**
+
+### Why:
+
+* Prevents hidden inconsistencies
+* Enables full auditability
+* Matches real financial systems
+
+### Tradeoff:
+
+* More complex data model
+
+---
+
+## 4. Idempotent Transaction Design
+
+### Decision:
+
+All financial operations require **idempotency keys**
+
+### Why:
+
+* Prevent duplicate charges
+* Enable safe retries
+* Ensure exactly-once execution
+
+---
+
+## 5. Store Money as Integers (Subunits)
+
+### Decision:
+
+* NGN → kobo
+* USD → cents
+
+### Why:
+
+* Avoid floating-point precision issues
+
+---
+
+# System Flow (FX Conversion)
+
+1. Client sends request with idempotency key
+2. Transaction created (`PENDING`)
+3. FX rate fetched from Redis
+4. Wallet balances locked (`FOR UPDATE`)
+5. Ledger entries created (DEBIT + CREDIT)
+6. Balances updated
+7. Transaction marked `SUCCESS`
+
+If any step fails → rollback
+
+---
+
+# Challenges & How They Were Solved
+
+## 1. Race Conditions
+
+### Problem:
+
+Concurrent requests could modify the same wallet
+
+### Solution:
+
+* Row-level locking (`FOR UPDATE`)
+* Short-lived transactions
+
+---
+
+## 2. Duplicate Transactions
+
+### Problem:
+
+Network retries could double-credit users
+
+### Solution:
+
+* Idempotency keys
+* Transaction state machine
+
+---
+
+## 3. FX Provider Downtime
+
+### Problem:
+
+External dependency failure
+
+### Solution:
+
+* Redis caching
+* fallback to last known rate
+
+---
+
+## 4. Precision Loss in Currency Conversion
+
+### Problem:
+
+Floating-point rounding errors can lead to "missing" money in financial systems.
+
+### Solution:
+
+*   **Integer-based storage**: All balances are in the smallest unit (kobo/cents).
+*   **Reject subunit-loss transactions**: If a conversion results in less than 1 whole unit (after rounding), the transaction is blocked.
+*   **Example**: 500 NGN kobo (5 Naira) converts to roughly 0.3 USD cents. Since we cannot credit 0.3 cents to a wallet, the system rounds to 0 and blocks the trade to prevent value loss.
+
+---
+
+# Scaling Strategy
+
+## Horizontal Scaling
+
+* Stateless API instances
+* Load-balanced traffic
+
+---
+
+## Database Scaling
+
+* Read replicas
+* Indexed queries
+* future partitioning
+
+---
+
+## Redis Scaling
+
+* Redis cluster
+* separation of cache & queues
+
+---
+
+## Worker Scaling
+
+* BullMQ workers scaled independently
+* handles async load (emails, future jobs)
+
+---
+
+# Reliability Guarantees
+
+* Atomic transactions
+* Idempotent operations
+* Immutable ledger
+* Retry-safe system
+
+---
+
+# Testing Strategy
+
+* Unit tests for logic
+* Integration tests for DB flows
+* E2E tests for API behavior
+
+---
+
+# What Makes This System Strong
+
+This is not just an API — it is a **financially safe system**.
+
+It guarantees:
+
+* No double spending
+* No lost funds
+* Consistent balances under concurrency
+* Full audit trail
+
+---
+
+# Future Improvements
+
+If scaled further, the next steps would be:
+
+### 1. Extract Ledger Service
+
+* isolate financial core
+
+### 2. Dedicated FX Rate Service
+
+* background syncing
+* provider failover
+
+### 3. Event-Driven Architecture
+
+* Kafka / streaming for transactions
+
+### 4. Observability
+
+* metrics (Prometheus)
+* tracing (OpenTelemetry)
+
+---
+
+# Key Takeaways
+
+This project demonstrates:
+
+* strong understanding of **financial system design**
+* ability to handle **concurrency and data integrity**
+* practical knowledge of **scaling backend systems**
+
+---
+
+# How to Talk About This (VERY IMPORTANT)
+
+When asked in interviews, say:
+
+> “I designed the system to guarantee financial correctness first, using a double-entry ledger and idempotent transactions. Then I optimized for scale using READ COMMITTED with row-level locking and a stateless architecture.”
+
+---
+
+# Why This Version Wins
+
+This does **three things recruiters love**:
+
+1. Shows **real-world engineering thinking**
+2. Explains **why decisions were made**
+3. Demonstrates **tradeoff awareness**

@@ -45,7 +45,18 @@ export class WalletController {
     description: 'Unique key to prevent duplicate transactions',
     required: true,
   })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Wallet funded successfully.' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Wallet funded successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Wallet funded successfully' },
+        status: { type: 'string', example: 'SUCCESS' },
+        transaction: { type: 'object' },
+      },
+    },
+  })
   @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid request or funding failure.' })
   async fundWallet(
     @CurrentUser('sub') userId: string,
@@ -70,7 +81,21 @@ export class WalletController {
     description: 'Unique key to prevent duplicate conversions',
     required: true,
   })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Currency converted successfully.' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Currency converted successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Conversion successful' },
+        status: { type: 'string', example: 'SUCCESS' },
+        rateVersion: { type: 'string' },
+        exchangeRate: { type: 'number' },
+        debit: { type: 'object' },
+        credit: { type: 'object' },
+      },
+    },
+  })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
     description: 'Insufficient balance, invalid currency pair, or amount too small.',
@@ -122,7 +147,21 @@ export class WalletController {
     description: 'Unique key to prevent duplicate trades',
     required: true,
   })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Trade executed successfully.' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Trade executed successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Conversion successful' },
+        status: { type: 'string', example: 'SUCCESS' },
+        rateVersion: { type: 'string' },
+        exchangeRate: { type: 'number' },
+        debit: { type: 'object' },
+        credit: { type: 'object' },
+      },
+    },
+  })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
     description: 'Insufficient balance, invalid currency pair, or amount too small.',

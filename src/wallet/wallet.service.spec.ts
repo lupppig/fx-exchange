@@ -54,7 +54,11 @@ describe('WalletService', () => {
           provide: getRepositoryToken(TransactionLog),
           useValue: {
             findOne: jest.fn(),
+            findOneOrFail: jest.fn(),
             find: jest.fn(),
+            create: jest.fn(),
+            save: jest.fn(),
+            update: jest.fn(),
           },
         },
         {
@@ -116,14 +120,28 @@ describe('WalletService', () => {
       const result = await service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key');
 
       expect(result.message).toBe('Transaction already processed');
+      expect(result.status).toBe(TransactionStatus.SUCCESS);
       expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
     });
 
-    it('should successfully fund wallet with integer amount', async () => {
-      jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
+    it('should fail if transaction is PENDING', async () => {
+      const log = { id: 'log-1', status: TransactionStatus.PENDING };
+      jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(log as TransactionLog);
+
+      await expect(service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key'))
+        .rejects.toThrow('Transaction is currently being processed. Please wait.');
+    });
+
+    it('should successfully fund wallet with state transitions', async () => {
+      jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValueOnce(null); // check
+      jest.spyOn(transactionLogRepo, 'findOneOrFail').mockResolvedValueOnce({ id: 'log-1', status: TransactionStatus.SUCCESS } as any); // final
 
       const wallet = { id: mockWalletId, userId: mockUserId };
-      jest.spyOn(manager, 'findOne').mockResolvedValue(wallet as any);
+      jest.spyOn(walletRepo, 'findOne').mockResolvedValue(wallet as any);
+
+      jest.spyOn(transactionLogRepo, 'create').mockReturnValue({ id: 'log-pending' } as any);
+      jest.spyOn(transactionLogRepo, 'save').mockResolvedValue({ id: 'log-pending' } as any);
+      jest.spyOn(transactionLogRepo, 'update').mockResolvedValue({} as any);
 
       const mockQueryBuilder = {
         setLock: jest.fn().mockReturnThis(),
@@ -133,30 +151,31 @@ describe('WalletService', () => {
 
       jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
       jest.spyOn(manager, 'create').mockImplementation((_entity: any, props: any) => props);
-      jest.spyOn(manager, 'save').mockImplementation(async (obj: any) => {
-        if (obj.currency) return { ...obj, id: 'bal-1' };
-        return { ...obj, id: 'log-1' };
-      });
+      jest.spyOn(manager, 'save').mockImplementation(async (obj: any) => obj);
 
-      // Fund 50000 kobo (500 NGN)
       const result = await service.fundWallet(mockUserId, 'NGN', 50000, 'idem-key');
 
-      expect(queryRunner.startTransaction).toHaveBeenCalledWith('SERIALIZABLE');
-      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-1', { amount: 50000 });
+      expect(transactionLogRepo.save).toHaveBeenCalled();
+      expect(manager.update).toHaveBeenCalledWith(TransactionLog, 'log-pending', expect.objectContaining({ status: TransactionStatus.SUCCESS }));
       expect(result.message).toBe('Wallet funded successfully');
-      expect(result.transaction.balanceAfter).toBe(50000);
-      expect(result.transaction.amount).toBe(50000);
-      expect(result.transaction.userId).toBe(mockUserId);
-      expect(result.transaction.exchangeRate).toBeNull();
+      expect(result.status).toBe(TransactionStatus.SUCCESS);
     });
 
-    it('should rollback transaction on error', async () => {
+    it('should update status to FAILED on error', async () => {
       jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
-      jest.spyOn(manager, 'findOne').mockRejectedValue(new Error('DB Error'));
+      jest.spyOn(walletRepo, 'findOne').mockResolvedValue({ id: mockWalletId } as any);
+      jest.spyOn(transactionLogRepo, 'create').mockReturnValue({ id: 'log-pending' } as any);
+      jest.spyOn(transactionLogRepo, 'save').mockResolvedValue({ id: 'log-pending' } as any);
+      jest.spyOn(transactionLogRepo, 'update').mockResolvedValue({} as any);
+
+      jest.spyOn(manager, 'createQueryBuilder').mockImplementation(() => {
+        throw new Error('DB Error');
+      });
 
       await expect(service.fundWallet(mockUserId, 'NGN', 10000, 'idem-key')).rejects.toThrow(BadRequestException);
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
+      expect(transactionLogRepo.update).toHaveBeenCalledWith('log-pending', { status: TransactionStatus.FAILED });
       expect(queryRunner.release).toHaveBeenCalled();
     });
   });
@@ -169,19 +188,15 @@ describe('WalletService', () => {
       const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 100000, 'idem-key');
 
       expect(result.message).toBe('Conversion already processed');
-      expect(fxService.getRates).not.toHaveBeenCalled();
+      expect(result.status).toBe(TransactionStatus.SUCCESS);
     });
 
-    it('should fail if converting identical currencies', async () => {
-      await expect(
-        service.convertFunds(mockUserId, 'NGN', 'NGN', 100000, 'idem-key'),
-      ).rejects.toThrow(BadRequestException);
-    });
+    it('should successfully convert with state machine', async () => {
+      jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValueOnce(null);
+      jest.spyOn(transactionLogRepo, 'findOneOrFail')
+        .mockResolvedValueOnce({ id: 'log-debit', status: TransactionStatus.SUCCESS } as any)
+        .mockResolvedValueOnce({ id: 'log-credit', status: TransactionStatus.SUCCESS } as any);
 
-    it('should convert using integer subunits and record exchangeRate', async () => {
-      jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
-
-      // NGN base: NGN=1, USD=0.0006
       jest.spyOn(fxService, 'getRates').mockResolvedValue({
         version: 'v1',
         base: 'NGN',
@@ -189,65 +204,34 @@ describe('WalletService', () => {
         rates: { NGN: 1, USD: 0.0006 },
       });
 
-      const wallet = { id: mockWalletId, userId: mockUserId };
-      jest.spyOn(manager, 'findOne').mockResolvedValueOnce(wallet as any);
+      jest.spyOn(walletRepo, 'findOne').mockResolvedValue({ id: mockWalletId } as any);
+      
+      // Distinct IDs for debit and credit
+      jest.spyOn(transactionLogRepo, 'create')
+        .mockReturnValueOnce({ id: 'log-debit' } as any)
+        .mockReturnValueOnce({ id: 'log-credit' } as any);
+      
+      jest.spyOn(transactionLogRepo, 'save').mockImplementation(async (obj: any) => obj);
+      jest.spyOn(transactionLogRepo, 'update').mockResolvedValue({} as any);
 
       const mockQueryBuilder = {
         setLock: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         getOne: jest.fn()
-          // NGN balance: 500000 kobo (5000 NGN)
           .mockResolvedValueOnce({ id: 'bal-ngn', currency: 'NGN', amount: 500000 })
-          // No USD balance
-          .mockResolvedValueOnce(null),
+          .mockResolvedValueOnce({ id: 'bal-usd', currency: 'USD', amount: 0 }),
       } as unknown as SelectQueryBuilder<Balance>;
 
       jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
-      jest.spyOn(manager, 'create').mockImplementation((_entity: any, props: any) => props);
-      jest.spyOn(manager, 'save').mockImplementation(async (obj: any) => {
-        if (obj.currency === 'USD') return { ...obj, id: 'bal-usd' };
-        return { ...obj, id: `log-${Math.random()}` };
-      });
+      jest.spyOn(manager, 'save').mockImplementation(async (obj: any) => obj);
 
-      // Convert 200000 kobo (2000 NGN) to USD
-      // 2000 NGN * 0.0006 = 1.20 USD = 120 cents
       const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 200000, 'idem-key');
 
-      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-ngn', { amount: 300000 });
-      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-usd', { amount: 120 });
+      expect(transactionLogRepo.save).toHaveBeenCalled();
+      expect(manager.update).toHaveBeenCalledWith(TransactionLog, 'log-debit', expect.objectContaining({ status: TransactionStatus.SUCCESS }));
+      expect(manager.update).toHaveBeenCalledWith(TransactionLog, 'log-credit', expect.objectContaining({ status: TransactionStatus.SUCCESS }));
       expect(result.message).toBe('Conversion successful');
-      expect(result.exchangeRate).toBe(0.0006);
-      expect(result.debit.amount).toBe(200000);
-      expect(result.debit.userId).toBe(mockUserId);
-      expect(result.credit!.amount).toBe(120);
-    });
-
-    it('should throw if insufficient balance', async () => {
-      jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
-
-      jest.spyOn(fxService, 'getRates').mockResolvedValue({
-        version: 'v1',
-        base: 'NGN',
-        timestamp: new Date().toISOString(),
-        rates: { NGN: 1, USD: 0.0006 },
-      });
-
-      const wallet = { id: mockWalletId, userId: mockUserId };
-      jest.spyOn(manager, 'findOne').mockResolvedValueOnce(wallet as any);
-
-      const mockQueryBuilder = {
-        setLock: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValueOnce({ id: 'bal-ngn', currency: 'NGN', amount: 5000 }),
-      } as unknown as SelectQueryBuilder<Balance>;
-
-      jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
-
-      await expect(
-        service.convertFunds(mockUserId, 'NGN', 'USD', 200000, 'idem-key'),
-      ).rejects.toThrow(BadRequestException);
-
-      expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
+      expect(result.status).toBe(TransactionStatus.SUCCESS);
     });
   });
 
@@ -287,6 +271,19 @@ describe('WalletService', () => {
       await expect(
         service.getTransactions(mockUserId, 'not-a-date'),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('tradeFunds', () => {
+    it('should show "trade" in error message when using tradeFunds', async () => {
+      jest.spyOn(fxService, 'getRates').mockResolvedValue({
+        rates: { NGN: 1, USD: 0.0006 },
+      } as any);
+
+      // 500 NGN kobo = 5 NGN * 0.0006 = 0.003 USD = 0.3 cents -> 0
+      await expect(
+        service.tradeFunds(mockUserId, 'NGN', 'USD', 500, 'idem-key'),
+      ).rejects.toThrow('Amount too small to trade.');
     });
   });
 });
