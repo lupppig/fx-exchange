@@ -6,18 +6,15 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
-  UseGuards,
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { WalletService } from './wallet.service.js';
 import { FundWalletDto } from './dto/fund-wallet.dto.js';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 
 @ApiTags('Wallet')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('wallet')
 export class WalletController {
   constructor(private readonly walletService: WalletService) {}
