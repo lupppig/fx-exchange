@@ -23,7 +23,6 @@ export class MailProcessor extends WorkerHost {
   }
 
   async process(job: Job<any>): Promise<any> {
-    this.logger.log(`Processing job ${job.id} of type ${job.name}`);
     switch (job.name) {
       case 'send-otp':
         return this.sendOtp(job.data);
@@ -34,7 +33,11 @@ export class MailProcessor extends WorkerHost {
 
   private async sendOtp(data: { email: string; otp: string }) {
     const { email, otp } = data;
-    this.logger.log(`Attempting to send OTP to ${email} via ${this.configService.get('MAIL_HOST')}:${this.configService.get('MAIL_PORT')}`);
+    
+    if (this.configService.get('NODE_ENV') === 'development') {
+      this.logger.log(`OTP for ${email}: ${otp}`);
+    }
+
     try {
       await this.transporter.sendMail({
         from: this.configService.get('MAIL_FROM'),
@@ -43,13 +46,8 @@ export class MailProcessor extends WorkerHost {
         text: `Your verification code is: ${otp}. It expires in 10 minutes.`,
         html: `<p>Your verification code is: <b>${otp}</b>. It expires in 10 minutes.</p>`,
       });
-      this.logger.log(`OTP sent successfully to ${email}`);
     } catch (error) {
-      if (error instanceof Error) {
-        this.logger.error(`Failed to send OTP to ${email}`, error.stack);
-      } else {
-        this.logger.error(`Failed to send OTP to ${email}`, String(error));
-      }
+      this.logger.error(`Failed to send OTP to ${email}`, error instanceof Error ? error.stack : String(error));
       throw error;
     }
   }

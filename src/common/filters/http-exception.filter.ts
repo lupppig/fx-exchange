@@ -35,12 +35,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
 
     if (typeof message === 'object' && message !== null) {
-      const { statusCode, error, message: msg, ...rest } = message as any;
-      if (rest.errors) {
-        responseBody.errors = rest.errors;
-      } else {
-        responseBody.message = msg || error || 'An error occurred';
-      }
+      const { message: msg, error } = message as any;
+      responseBody.message = msg || error || 'An error occurred';
     } else {
       responseBody.message = message;
     }

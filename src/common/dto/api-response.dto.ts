@@ -5,7 +5,6 @@ export class HealthIndicatorResultDto {
   status!: string;
 }
 
-// HealthCheckData is a flat record of indicators
 export type HealthCheckData = Record<string, HealthIndicatorResultDto>;
 
 export class HealthCheckResponseDto {
@@ -40,19 +39,12 @@ export class ErrorResponseDto {
   @ApiProperty({ example: false })
   success!: boolean;
 
-  @ApiProperty({ example: 500 })
+  @ApiProperty({ example: 400 })
   statusCode!: number;
 
   @ApiProperty({ example: '2026-03-17T08:54:09.000Z' })
   timestamp!: string;
 
-  @ApiProperty({ example: '/api/v1/health' })
-  path!: string;
-
-  @ApiProperty({ 
-    example: { 
-      message: 'Internal server error' 
-    } 
-  })
-  error!: any;
+  @ApiProperty({ example: 'Email already exists' })
+  message!: string;
 }

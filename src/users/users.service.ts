@@ -22,4 +22,8 @@ export class UsersService {
   async findById(id: string): Promise<User | null> {
     return this.userRepository.findOne({ where: { id } });
   }
+
+  async update(id: string, updateData: Partial<User>): Promise<void> {
+    await this.userRepository.update(id, updateData);
+  }
 }

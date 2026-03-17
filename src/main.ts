@@ -1,5 +1,5 @@
 import { NestFactory, HttpAdapterHost } from '@nestjs/core';
-import { ValidationPipe, VersioningType, HttpStatus, UnprocessableEntityException } from '@nestjs/common';
+import { ValidationPipe, VersioningType, HttpStatus, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
@@ -12,14 +12,11 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   
-  // Logger
   app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
 
-  // Security
   app.use(helmet());
   app.enableCors();
 
-  // Prefix & Versioning
   const globalPrefix = configService.get<string>('GLOBAL_PREFIX', 'api');
   app.setGlobalPrefix(globalPrefix);
   app.enableVersioning({
@@ -27,31 +24,26 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
-  // Global Pipes
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
-      errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+      errorHttpStatusCode: HttpStatus.BAD_REQUEST,
       exceptionFactory: (errors) => {
-        const result = errors.reduce((acc, error) => {
-          acc[error.property] = Object.values(error.constraints || {})[0];
-          return acc;
-        }, {} as Record<string, string>);
-        return new UnprocessableEntityException({ errors: result });
+        const message = errors
+          .map((error) => Object.values(error.constraints || {}).join(', '))
+          .join('; ');
+        return new BadRequestException(message);
       },
     }),
   );
 
-  // Global Filter
   const httpAdapterHost = app.get(HttpAdapterHost);
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
 
-  // Global Interceptor
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  // Swagger
   const config = new DocumentBuilder()
     .setTitle('FX Trading API')
     .setDescription('The FX Trading API production-grade service')
