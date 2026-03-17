@@ -10,6 +10,7 @@ import { envValidationSchema } from './config/env.validation.js';
 import { HealthModule } from './health/health.module.js';
 import { UsersModule } from './users/users.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { WalletModule } from './wallet/wallet.module.js';
 import { User } from './users/user.entity.js';
 
 @Module({
@@ -73,6 +74,7 @@ import { User } from './users/user.entity.js';
     HealthModule,
     UsersModule,
     AuthModule,
+    WalletModule,
   ],
 })
 export class AppModule {}
