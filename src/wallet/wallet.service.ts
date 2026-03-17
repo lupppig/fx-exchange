@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, LessThan } from 'typeorm';
 import { Wallet } from './entities/wallet.entity.js';
 import { Balance } from './entities/balance.entity.js';
 import { TransactionLog } from './entities/transaction-log.entity.js';
@@ -8,6 +8,7 @@ import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
 import { TransactionStatus } from './enums/transaction-status.enum.js';
 import { FxService } from '../fx/fx.service.js';
+import { getSubunitFactor } from './utils/currency.util.js';
 
 @Injectable()
 export class WalletService {
@@ -42,6 +43,10 @@ export class WalletService {
 
   async fundWallet(userId: string, currency: string, amount: number, idempotencyKey: string) {
     const normalizedCurrency = currency.toUpperCase();
+
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new BadRequestException('Amount must be a positive integer in smallest currency unit');
+    }
 
     const existingLog = await this.transactionLogRepository.findOne({
       where: { idempotencyKey },
@@ -94,12 +99,14 @@ export class WalletService {
 
       const txLog = queryRunner.manager.create(TransactionLog, {
         walletId: wallet.id,
+        userId,
         type: TransactionType.CREDIT,
         purpose: TransactionPurpose.FUNDING,
         currency: normalizedCurrency,
         amount,
         balanceBefore,
         balanceAfter,
+        exchangeRate: null,
         idempotencyKey,
         status: TransactionStatus.SUCCESS,
       });
@@ -133,6 +140,10 @@ export class WalletService {
       throw new BadRequestException('Cannot convert to the same currency');
     }
 
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new BadRequestException('Amount must be a positive integer in smallest currency unit');
+    }
+
     const debitKey = `${idempotencyKey}:debit`;
     const creditKey = `${idempotencyKey}:credit`;
 
@@ -159,15 +170,22 @@ export class WalletService {
       );
     }
 
+    // Convert subunits: amount is in `from` subunits, we need `to` subunits
+    const fromFactor = getSubunitFactor(from);
+    const toFactor = getSubunitFactor(to);
     const exchangeRate = rates.rates[to] / rates.rates[from];
-    const convertedAmount = Math.round(amount * exchangeRate * 10000) / 10000;
+
+    // Convert: fromSubunits -> major units -> apply rate -> toSubunits
+    const majorAmount = amount / fromFactor;
+    const convertedMajor = majorAmount * exchangeRate;
+    const convertedAmount = Math.round(convertedMajor * toFactor);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction('SERIALIZABLE');
 
     try {
-      let wallet = await queryRunner.manager.findOne(Wallet, {
+      const wallet = await queryRunner.manager.findOne(Wallet, {
         where: { userId },
       });
 
@@ -209,33 +227,37 @@ export class WalletService {
       }
 
       const fromBefore = Number(fromBalance.amount);
-      const fromAfter = Math.round((fromBefore - amount) * 10000) / 10000;
+      const fromAfter = fromBefore - amount;
       const toBefore = Number(toBalance.amount);
-      const toAfter = Math.round((toBefore + convertedAmount) * 10000) / 10000;
+      const toAfter = toBefore + convertedAmount;
 
       await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
       await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
 
       const debitLog = queryRunner.manager.create(TransactionLog, {
         walletId: wallet.id,
+        userId,
         type: TransactionType.DEBIT,
         purpose: TransactionPurpose.EXCHANGE,
         currency: from,
         amount,
         balanceBefore: fromBefore,
         balanceAfter: fromAfter,
+        exchangeRate,
         idempotencyKey: debitKey,
         status: TransactionStatus.SUCCESS,
       });
 
       const creditLog = queryRunner.manager.create(TransactionLog, {
         walletId: wallet.id,
+        userId,
         type: TransactionType.CREDIT,
         purpose: TransactionPurpose.EXCHANGE,
         currency: to,
         amount: convertedAmount,
         balanceBefore: toBefore,
         balanceAfter: toAfter,
+        exchangeRate,
         idempotencyKey: creditKey,
         status: TransactionStatus.SUCCESS,
       });
@@ -268,5 +290,37 @@ export class WalletService {
     idempotencyKey: string,
   ) {
     return this.convertFunds(userId, fromCurrency, toCurrency, amount, idempotencyKey);
+  }
+
+  async getTransactions(userId: string, cursor?: string, limit: number = 20) {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const take = safeLimit + 1;
+
+    const whereCondition: Record<string, any> = { userId };
+    if (cursor) {
+      const cursorDate = new Date(cursor);
+      if (isNaN(cursorDate.getTime())) {
+        throw new BadRequestException('Invalid cursor format. Use ISO 8601 timestamp.');
+      }
+      whereCondition.createdAt = LessThan(cursorDate);
+    }
+
+    const results = await this.transactionLogRepository.find({
+      where: whereCondition,
+      order: { createdAt: 'DESC' },
+      take,
+    });
+
+    const hasMore = results.length > safeLimit;
+    const transactions = hasMore ? results.slice(0, safeLimit) : results;
+    const nextCursor = hasMore
+      ? transactions[transactions.length - 1].createdAt.toISOString()
+      : null;
+
+    return {
+      transactions,
+      nextCursor,
+      count: transactions.length,
+    };
   }
 }

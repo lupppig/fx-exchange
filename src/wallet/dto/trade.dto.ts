@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsNumber, Min, IsUppercase, Length } from 'class-validator';
+import { IsNotEmpty, IsString, IsInt, Min, IsUppercase, Length } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class TradeDto {
@@ -23,11 +23,11 @@ export class TradeDto {
   toCurrency!: string;
 
   @ApiProperty({
-    example: 50,
-    description: 'The amount of fromCurrency to trade',
-    minimum: 0.01,
+    example: 5000,
+    description: 'Amount of fromCurrency in smallest unit (e.g., cents for USD, kobo for NGN)',
+    minimum: 1,
   })
-  @IsNumber()
-  @Min(0.01)
+  @IsInt()
+  @Min(1)
   amount!: number;
 }

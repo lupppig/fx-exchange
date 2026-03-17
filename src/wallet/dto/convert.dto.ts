@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsNumber, Min, IsUppercase, Length } from 'class-validator';
+import { IsNotEmpty, IsString, IsInt, Min, IsUppercase, Length } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ConvertDto {
@@ -23,11 +23,11 @@ export class ConvertDto {
   toCurrency!: string;
 
   @ApiProperty({
-    example: 1000,
-    description: 'The amount of fromCurrency to convert',
-    minimum: 0.01,
+    example: 100000,
+    description: 'Amount of fromCurrency in smallest unit (e.g., kobo for NGN, cents for USD)',
+    minimum: 1,
   })
-  @IsNumber()
-  @Min(0.01)
+  @IsInt()
+  @Min(1)
   amount!: number;
 }

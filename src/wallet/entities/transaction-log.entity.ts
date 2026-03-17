@@ -19,6 +19,10 @@ export class TransactionLog {
   @Index()
   walletId!: string;
 
+  @Column()
+  @Index()
+  userId!: string;
+
   @Column({ type: 'enum', enum: TransactionType })
   type!: TransactionType;
 
@@ -28,14 +32,17 @@ export class TransactionLog {
   @Column({ length: 3 })
   currency!: string;
 
-  @Column({ type: 'decimal', precision: 18, scale: 4 })
+  @Column({ type: 'bigint' })
   amount!: number;
 
-  @Column({ type: 'decimal', precision: 18, scale: 4 })
+  @Column({ type: 'bigint' })
   balanceBefore!: number;
 
-  @Column({ type: 'decimal', precision: 18, scale: 4 })
+  @Column({ type: 'bigint' })
   balanceAfter!: number;
+
+  @Column({ type: 'decimal', precision: 18, scale: 8, nullable: true })
+  exchangeRate!: number | null;
 
   @Column({ unique: true })
   idempotencyKey!: string;
@@ -44,6 +51,7 @@ export class TransactionLog {
   status!: TransactionStatus;
 
   @CreateDateColumn()
+  @Index()
   createdAt!: Date;
 
   @UpdateDateColumn()

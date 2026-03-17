@@ -26,7 +26,7 @@ export class Balance {
   @Column({ length: 3 })
   currency!: string;
 
-  @Column({ type: 'decimal', precision: 18, scale: 4, default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   amount!: number;
 
   @CreateDateColumn()

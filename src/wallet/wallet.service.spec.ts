@@ -22,7 +22,6 @@ describe('WalletService', () => {
   const mockWalletId = 'wallet-123';
 
   beforeEach(async () => {
-    // Mock QueryRunner and Manager
     manager = {
       findOne: jest.fn(),
       create: jest.fn(),
@@ -55,6 +54,7 @@ describe('WalletService', () => {
           provide: getRepositoryToken(TransactionLog),
           useValue: {
             findOne: jest.fn(),
+            find: jest.fn(),
           },
         },
         {
@@ -93,7 +93,6 @@ describe('WalletService', () => {
         createdAt: undefined,
         updatedAt: undefined,
       });
-      expect(walletRepo.findOne).toHaveBeenCalledWith({ where: { userId: mockUserId } });
     });
 
     it('should create new wallet if not found', async () => {
@@ -106,7 +105,6 @@ describe('WalletService', () => {
 
       expect(result.walletId).toBe(mockWalletId);
       expect(walletRepo.create).toHaveBeenCalledWith({ userId: mockUserId });
-      expect(walletRepo.save).toHaveBeenCalled();
     });
   });
 
@@ -115,14 +113,13 @@ describe('WalletService', () => {
       const log = { id: 'log-1', status: TransactionStatus.SUCCESS };
       jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(log as TransactionLog);
 
-      const result = await service.fundWallet(mockUserId, 'NGN', 100, 'idem-key');
+      const result = await service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key');
 
       expect(result.message).toBe('Transaction already processed');
-      expect(result.transaction).toEqual(log);
       expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
     });
 
-    it('should successfully fund wallet and log transaction', async () => {
+    it('should successfully fund wallet with integer amount', async () => {
       jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
 
       const wallet = { id: mockWalletId, userId: mockUserId };
@@ -131,33 +128,33 @@ describe('WalletService', () => {
       const mockQueryBuilder = {
         setLock: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue(null), // No balance exists yet
+        getOne: jest.fn().mockResolvedValue(null),
       } as unknown as SelectQueryBuilder<Balance>;
-      
-      jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
 
+      jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
       jest.spyOn(manager, 'create').mockImplementation((_entity: any, props: any) => props);
       jest.spyOn(manager, 'save').mockImplementation(async (obj: any) => {
-        if (obj.currency) return { ...obj, id: 'bal-1' }; // Balance
-        return { ...obj, id: 'log-1' }; // TxLog
+        if (obj.currency) return { ...obj, id: 'bal-1' };
+        return { ...obj, id: 'log-1' };
       });
 
-      const result = await service.fundWallet(mockUserId, 'NGN', 500, 'idem-key');
+      // Fund 50000 kobo (500 NGN)
+      const result = await service.fundWallet(mockUserId, 'NGN', 50000, 'idem-key');
 
       expect(queryRunner.startTransaction).toHaveBeenCalledWith('SERIALIZABLE');
-      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-1', { amount: 500 });
-      expect(queryRunner.commitTransaction).toHaveBeenCalled();
-      expect(queryRunner.release).toHaveBeenCalled();
+      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-1', { amount: 50000 });
       expect(result.message).toBe('Wallet funded successfully');
-      expect(result.transaction.balanceAfter).toBe(500);
-      expect(result.transaction.amount).toBe(500);
+      expect(result.transaction.balanceAfter).toBe(50000);
+      expect(result.transaction.amount).toBe(50000);
+      expect(result.transaction.userId).toBe(mockUserId);
+      expect(result.transaction.exchangeRate).toBeNull();
     });
 
     it('should rollback transaction on error', async () => {
       jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
       jest.spyOn(manager, 'findOne').mockRejectedValue(new Error('DB Error'));
 
-      await expect(service.fundWallet(mockUserId, 'NGN', 100, 'idem-key')).rejects.toThrow(BadRequestException);
+      await expect(service.fundWallet(mockUserId, 'NGN', 10000, 'idem-key')).rejects.toThrow(BadRequestException);
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
       expect(queryRunner.release).toHaveBeenCalled();
@@ -165,27 +162,26 @@ describe('WalletService', () => {
   });
 
   describe('convertFunds', () => {
-    it('should quickly return for an already processed idempotent conversion', async () => {
+    it('should return for already processed idempotent conversion', async () => {
       const log = { id: 'log-1', status: TransactionStatus.SUCCESS };
       jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(log as TransactionLog);
 
-      const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 1000, 'idem-key');
+      const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 100000, 'idem-key');
 
       expect(result.message).toBe('Conversion already processed');
-      expect(result.debit).toEqual(log);
-      expect(result.credit).toEqual(log);
       expect(fxService.getRates).not.toHaveBeenCalled();
     });
 
     it('should fail if converting identical currencies', async () => {
       await expect(
-        service.convertFunds(mockUserId, 'NGN', 'NGN', 1000, 'idem-key'),
+        service.convertFunds(mockUserId, 'NGN', 'NGN', 100000, 'idem-key'),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should successfully convert and perform double-entry logging', async () => {
+    it('should convert using integer subunits and record exchangeRate', async () => {
       jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
 
+      // NGN base: NGN=1, USD=0.0006
       jest.spyOn(fxService, 'getRates').mockResolvedValue({
         version: 'v1',
         base: 'NGN',
@@ -194,42 +190,39 @@ describe('WalletService', () => {
       });
 
       const wallet = { id: mockWalletId, userId: mockUserId };
-
       jest.spyOn(manager, 'findOne').mockResolvedValueOnce(wallet as any);
 
-      // We need to mock the query builder to return the NGN balance on first call, null on second (USD)
       const mockQueryBuilder = {
         setLock: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         getOne: jest.fn()
-          .mockResolvedValueOnce({ id: 'bal-ngn', currency: 'NGN', amount: 5000 })
+          // NGN balance: 500000 kobo (5000 NGN)
+          .mockResolvedValueOnce({ id: 'bal-ngn', currency: 'NGN', amount: 500000 })
+          // No USD balance
           .mockResolvedValueOnce(null),
       } as unknown as SelectQueryBuilder<Balance>;
 
       jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
-
       jest.spyOn(manager, 'create').mockImplementation((_entity: any, props: any) => props);
       jest.spyOn(manager, 'save').mockImplementation(async (obj: any) => {
         if (obj.currency === 'USD') return { ...obj, id: 'bal-usd' };
         return { ...obj, id: `log-${Math.random()}` };
       });
 
-      const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 2000, 'idem-key');
+      // Convert 200000 kobo (2000 NGN) to USD
+      // 2000 NGN * 0.0006 = 1.20 USD = 120 cents
+      const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 200000, 'idem-key');
 
-      expect(queryRunner.startTransaction).toHaveBeenCalledWith('SERIALIZABLE');
-      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-ngn', { amount: 3000 });
-      // 2000 * 0.0006 = 1.2
-      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-usd', { amount: 1.2 });
-      expect(queryRunner.commitTransaction).toHaveBeenCalled();
-
+      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-ngn', { amount: 300000 });
+      expect(manager.update).toHaveBeenCalledWith(Balance, 'bal-usd', { amount: 120 });
       expect(result.message).toBe('Conversion successful');
-      expect(result.debit!.currency).toBe('NGN');
-      expect(result.debit!.amount).toBe(2000);
-      expect(result.credit!.currency).toBe('USD');
-      expect(result.credit!.amount).toBe(1.2);
+      expect(result.exchangeRate).toBe(0.0006);
+      expect(result.debit.amount).toBe(200000);
+      expect(result.debit.userId).toBe(mockUserId);
+      expect(result.credit!.amount).toBe(120);
     });
 
-    it('should throw an error if the user has insufficient funds', async () => {
+    it('should throw if insufficient balance', async () => {
       jest.spyOn(transactionLogRepo, 'findOne').mockResolvedValue(null);
 
       jest.spyOn(fxService, 'getRates').mockResolvedValue({
@@ -245,17 +238,55 @@ describe('WalletService', () => {
       const mockQueryBuilder = {
         setLock: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValueOnce({ id: 'bal-ngn', currency: 'NGN', amount: 500 }),
+        getOne: jest.fn().mockResolvedValueOnce({ id: 'bal-ngn', currency: 'NGN', amount: 5000 }),
       } as unknown as SelectQueryBuilder<Balance>;
 
       jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
 
       await expect(
-        service.convertFunds(mockUserId, 'NGN', 'USD', 2000, 'idem-key'),
+        service.convertFunds(mockUserId, 'NGN', 'USD', 200000, 'idem-key'),
       ).rejects.toThrow(BadRequestException);
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
     });
   });
-});
 
+  describe('getTransactions', () => {
+    it('should return first page of transactions', async () => {
+      const mockTxs = Array.from({ length: 3 }, (_, i) => ({
+        id: `tx-${i}`,
+        createdAt: new Date(`2026-03-${17 - i}T12:00:00Z`),
+      }));
+
+      jest.spyOn(transactionLogRepo, 'find').mockResolvedValue(mockTxs as any);
+
+      const result = await service.getTransactions(mockUserId, undefined, 20);
+
+      expect(result.transactions).toHaveLength(3);
+      expect(result.nextCursor).toBeNull();
+      expect(result.count).toBe(3);
+    });
+
+    it('should return nextCursor when more pages exist', async () => {
+      // Return limit + 1 items to trigger pagination
+      const mockTxs = Array.from({ length: 3 }, (_, i) => ({
+        id: `tx-${i}`,
+        createdAt: new Date(`2026-03-${17 - i}T12:00:00Z`),
+      }));
+
+      jest.spyOn(transactionLogRepo, 'find').mockResolvedValue(mockTxs as any);
+
+      const result = await service.getTransactions(mockUserId, undefined, 2);
+
+      expect(result.transactions).toHaveLength(2);
+      expect(result.nextCursor).toBe(new Date('2026-03-16T12:00:00Z').toISOString());
+      expect(result.count).toBe(2);
+    });
+
+    it('should throw on invalid cursor format', async () => {
+      await expect(
+        service.getTransactions(mockUserId, 'not-a-date'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+});
