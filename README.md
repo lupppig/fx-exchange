@@ -1,98 +1,130 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# FX Exchange API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A high-performance currency exchange and wallet management service built with NestJS. This application provides a production-ready solution for managing multi-currency balances, real-time rate discovery, and atomic financial conversions.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## System Architecture
 
-## Description
+The application follows a modular monolith approach, ensuring a clean separation of concerns between authentication, wallet operations, and foreign exchange logic.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+### Technical Stack
+* **Framework**: NestJS (Node.js)
+* **Database**: PostgreSQL with TypeORM
+* **Caching**: Redis
+* **Task Queue**: BullMQ
+* **Security**: JWT Authentication and OTP Verification
 
-## Project setup
+### Component Interaction Flow
 
-```bash
-$ npm install
+```mermaid
+graph TD
+    User([User Client]) --> LB[Load Balancer]
+    LB --> API[API Instance]
+    
+    subgraph Service Layer
+        API --> Auth[Auth Module]
+        API --> Wallet[Wallet Module]
+        API --> FX[FX Module]
+    end
+    
+    subgraph Data Layer
+        FX --> Redis[(Redis Cache)]
+        Auth --> Redis
+        Wallet --> Postgres[(PostgreSQL)]
+    end
+    
+    subgraph Async Processing
+        Auth --> Queue[BullMQ]
+        Queue --> Mailer[Mail Worker]
+    end
+    
+    FX -.-> Provider[External FX API]
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+## Core Functionality
 
-# watch mode
-$ npm run start:dev
+### Authentication and Onboarding
+Registration is secured via an email-based One-Time Password (OTP) system. Upon successful verification, users are issued a JWT for session management. This ensures that only verified users can access financial endpoints.
 
-# production mode
-$ npm run start:prod
+### Wallet and Balance Management
+The system utilizes a wallet-per-user model, where a single wallet contains multiple distinct balances isolated by currency (e.g., USD, EUR, NGN). All balance updates are performed using pessimistic row-level locking to ensure total consistency during concurrent operations.
+
+### Atomic Currency Conversion
+The FX engine performs conversions as atomic transactions. When a user swaps currencies, the system debits the source balance and credits the target balance within a single database transaction. This prevents "partial success" scenarios and ensures the total value of assets remains consistent.
+
+---
+
+## Production Guarantees
+
+### Financial Integrity
+* **Optimized Isolation**: The system uses the **READ COMMITTED** isolation level combined with explicit row-level locking (**FOR UPDATE**) to provide the best balance between performance and consistency.
+* **Pessimistic Locking**: Row-level locks are acquired on balances during updates to prevent race conditions and ensure data integrity in high-concurrency environments.
+* **Idempotency**: All write operations (funding, conversion) require a client-provided idempotency key, preventing duplicate processing of the same transaction.
+
+### Resilience and Safety
+* **FX Rate Fallback**: Real-time rates are cached in Redis. In the event of an external provider failure, the system automatically falls back to the last known good rates to maintain service availability.
+* **Auditability**: Every balance change is recorded in an immutable transaction log, providing a complete audit trail for reconciliation.
+
+---
+
+## Scaling Strategy
+
+The application is designed to scale horizontally across every layer of the stack.
+
+### Scaling Architecture
+
+```mermaid
+graph LR
+    User([Users]) --> LB[Load Balancer]
+    
+    subgraph "Application Scale"
+        LB --> App1[App Instance 1]
+        LB --> App2[App Instance N]
+    end
+    
+    subgraph "State & Cache Scale"
+        App1 & App2 --> RedisCl[Redis Cluster]
+        App1 & App2 --> PG[(Postgres Master)]
+        PG -.-> PGR[Postgres Read Replicas]
+    end
+    
+    subgraph "Worker Scale"
+        RedisCl --> W1[Worker Instance 1]
+        RedisCl --> W2[Worker Instance N]
+    end
 ```
 
-## Run tests
+### Strategic Path to Scale
+* **Stateless API**: Application instances carry no local state, allowing them to be scaled up or down behind a load balancer without impact.
+* **Database Optimization**: The system is ready for read-replicas to offload heavy query traffic (like transaction history) from the master node.
+* **Distributed Queues**: Using BullMQ with Redis enables horizontal scaling of background workers to handle massive volumes of asynchronous tasks.
+* **Connection Management**: Active pooling ensures efficient use of database resources as the number of application instances increases.
+
+---
+
+## Getting Started
+
+### Prerequisites
+* Node.js (v18+)
+* Docker and Docker Compose
+
+### Quick Start
+The easiest way to start the development environment is using the provided script:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+./scripts/dev.sh
 ```
 
-## Deployment
+### API Documentation
+Once the service is running, interactive Swagger documentation is available at:
+[http://localhost:3000/api/docs](http://localhost:3000/api/docs)
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+---
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
+## Testing
+The codebase maintains high stability through rigorous unit and integration testing:
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run test        # Unit tests
+npm run test:e2e    # E2E test suite
 ```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).

@@ -61,7 +61,7 @@ export class WalletService {
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
-    await queryRunner.startTransaction('SERIALIZABLE');
+    await queryRunner.startTransaction();
 
     try {
       let wallet = await queryRunner.manager.findOne(Wallet, {
@@ -188,7 +188,7 @@ export class WalletService {
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
-    await queryRunner.startTransaction('SERIALIZABLE');
+    await queryRunner.startTransaction();
 
     try {
       const wallet = await queryRunner.manager.findOne(Wallet, {
