@@ -180,6 +180,12 @@ export class WalletService {
     const convertedMajor = majorAmount * exchangeRate;
     const convertedAmount = Math.round(convertedMajor * toFactor);
 
+    if (convertedAmount <= 0) {
+      throw new BadRequestException(
+        `Amount too small to convert. ${amount} ${from} subunits converts to 0 ${to} subunits at the current rate.`,
+      );
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction('SERIALIZABLE');

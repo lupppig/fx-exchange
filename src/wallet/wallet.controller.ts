@@ -159,6 +159,10 @@ export class WalletController {
     @CurrentUser('sub') userId: string,
     @Query() query: GetTransactionsDto,
   ) {
-    return this.walletService.getTransactions(userId, query.cursor, query.limit);
+    const data = await this.walletService.getTransactions(userId, query.cursor, query.limit);
+    return {
+      success: true,
+      data,
+    };
   }
 }
