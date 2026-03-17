@@ -48,7 +48,7 @@ export class FxService {
 
   private async fetchAndCacheRates(): Promise<VersionedRates> {
     try {
-      const url = `https://v6.exchangerate-api.com/v6/${this.apiKey}/latest/USD`;
+      const url = `https://v6.exchangerate-api.com/v6/${this.apiKey}/latest/NGN`;
       const { data } = await firstValueFrom(
         this.httpService.get<FxRateResponse>(url, { timeout: 5000 }),
       );
