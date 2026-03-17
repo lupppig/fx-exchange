@@ -8,10 +8,12 @@ import { Wallet } from './entities/wallet.entity.js';
 import { Balance } from './entities/balance.entity.js';
 import { TransactionLog } from './entities/transaction-log.entity.js';
 import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
+import { FxModule } from '../fx/fx.module.js';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Wallet, Balance, TransactionLog]),
+    FxModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

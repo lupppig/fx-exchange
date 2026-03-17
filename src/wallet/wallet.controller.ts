@@ -11,6 +11,8 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { WalletService } from './wallet.service.js';
 import { FundWalletDto } from './dto/fund-wallet.dto.js';
+import { ConvertDto } from './dto/convert.dto.js';
+import { TradeDto } from './dto/trade.dto.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 
 @ApiTags('Wallet')
@@ -28,30 +30,6 @@ export class WalletController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Wallet retrieved successfully.',
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', example: true },
-        timestamp: { type: 'string', example: '2026-03-17T12:00:00Z' },
-        data: {
-          type: 'object',
-          properties: {
-            id: { type: 'string', example: 'uuid' },
-            userId: { type: 'string', example: 'uuid' },
-            balances: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  currency: { type: 'string', example: 'NGN' },
-                  amount: { type: 'string', example: '1000.0000' },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
   })
   async getWallet(@CurrentUser('sub') userId: string) {
     return this.walletService.getWallet(userId);
@@ -68,48 +46,8 @@ export class WalletController {
     description: 'Unique key to prevent duplicate transactions',
     required: true,
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Wallet funded successfully.',
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', example: true },
-        timestamp: { type: 'string', example: '2026-03-17T12:00:00Z' },
-        data: {
-          type: 'object',
-          properties: {
-            message: { type: 'string', example: 'Wallet funded successfully' },
-            transaction: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', example: 'uuid' },
-                type: { type: 'string', example: 'CREDIT' },
-                purpose: { type: 'string', example: 'FUNDING' },
-                currency: { type: 'string', example: 'NGN' },
-                amount: { type: 'string', example: '1000.0000' },
-                balanceBefore: { type: 'string', example: '0.0000' },
-                balanceAfter: { type: 'string', example: '1000.0000' },
-              },
-            },
-          },
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Invalid request or funding failure.',
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', example: false },
-        statusCode: { type: 'number', example: 400 },
-        timestamp: { type: 'string', example: '2026-03-17T12:00:00Z' },
-        message: { type: 'string', example: 'Idempotency key is required' },
-      },
-    },
-  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Wallet funded successfully.' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid request or funding failure.' })
   async fundWallet(
     @CurrentUser('sub') userId: string,
     @Headers('x-idempotency-key') idempotencyKey: string,
@@ -120,5 +58,67 @@ export class WalletController {
     }
 
     return this.walletService.fundWallet(userId, dto.currency, dto.amount, idempotencyKey);
+  }
+
+  @Post('convert')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Convert currency',
+    description: 'Converts funds from one currency to another using real-time FX rates. Supports NGN ↔ any currency.',
+  })
+  @ApiHeader({
+    name: 'x-idempotency-key',
+    description: 'Unique key to prevent duplicate conversions',
+    required: true,
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Currency converted successfully.' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Insufficient balance or invalid currency pair.' })
+  async convert(
+    @CurrentUser('sub') userId: string,
+    @Headers('x-idempotency-key') idempotencyKey: string,
+    @Body() dto: ConvertDto,
+  ) {
+    if (!idempotencyKey) {
+      throw new BadRequestException('Idempotency key is required');
+    }
+
+    return this.walletService.convertFunds(
+      userId,
+      dto.fromCurrency,
+      dto.toCurrency,
+      dto.amount,
+      idempotencyKey,
+    );
+  }
+
+  @Post('trade')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Trade currency',
+    description: 'Trade Naira ↔ other currency using real-time FX rates. Atomic debit and credit.',
+  })
+  @ApiHeader({
+    name: 'x-idempotency-key',
+    description: 'Unique key to prevent duplicate trades',
+    required: true,
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Trade executed successfully.' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Insufficient balance or invalid currency pair.' })
+  async trade(
+    @CurrentUser('sub') userId: string,
+    @Headers('x-idempotency-key') idempotencyKey: string,
+    @Body() dto: TradeDto,
+  ) {
+    if (!idempotencyKey) {
+      throw new BadRequestException('Idempotency key is required');
+    }
+
+    return this.walletService.tradeFunds(
+      userId,
+      dto.fromCurrency,
+      dto.toCurrency,
+      dto.amount,
+      idempotencyKey,
+    );
   }
 }

@@ -7,6 +7,7 @@ import { TransactionLog } from './entities/transaction-log.entity.js';
 import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
 import { TransactionStatus } from './enums/transaction-status.enum.js';
+import { FxService } from '../fx/fx.service.js';
 
 @Injectable()
 export class WalletService {
@@ -16,6 +17,7 @@ export class WalletService {
     @InjectRepository(TransactionLog)
     private readonly transactionLogRepository: Repository<TransactionLog>,
     private readonly dataSource: DataSource,
+    private readonly fxService: FxService,
   ) {}
 
   async getWallet(userId: string) {
@@ -115,5 +117,156 @@ export class WalletService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  async convertFunds(
+    userId: string,
+    fromCurrency: string,
+    toCurrency: string,
+    amount: number,
+    idempotencyKey: string,
+  ) {
+    const from = fromCurrency.toUpperCase();
+    const to = toCurrency.toUpperCase();
+
+    if (from === to) {
+      throw new BadRequestException('Cannot convert to the same currency');
+    }
+
+    const debitKey = `${idempotencyKey}:debit`;
+    const creditKey = `${idempotencyKey}:credit`;
+
+    const existingDebit = await this.transactionLogRepository.findOne({
+      where: { idempotencyKey: debitKey },
+    });
+
+    if (existingDebit && existingDebit.status === TransactionStatus.SUCCESS) {
+      const existingCredit = await this.transactionLogRepository.findOne({
+        where: { idempotencyKey: creditKey },
+      });
+      return {
+        message: 'Conversion already processed',
+        debit: existingDebit,
+        credit: existingCredit,
+      };
+    }
+
+    const rates = await this.fxService.getRates();
+
+    if (!rates.rates[from] || !rates.rates[to]) {
+      throw new BadRequestException(
+        `Unsupported currency pair: ${from}/${to}`,
+      );
+    }
+
+    const exchangeRate = rates.rates[to] / rates.rates[from];
+    const convertedAmount = Math.round(amount * exchangeRate * 10000) / 10000;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction('SERIALIZABLE');
+
+    try {
+      let wallet = await queryRunner.manager.findOne(Wallet, {
+        where: { userId },
+      });
+
+      if (!wallet) {
+        throw new BadRequestException('Wallet not found');
+      }
+
+      const fromBalance = await queryRunner.manager
+        .createQueryBuilder(Balance, 'balance')
+        .setLock('pessimistic_write')
+        .where('balance.walletId = :walletId AND balance.currency = :currency', {
+          walletId: wallet.id,
+          currency: from,
+        })
+        .getOne();
+
+      if (!fromBalance || Number(fromBalance.amount) < amount) {
+        throw new BadRequestException(
+          `Insufficient ${from} balance. Available: ${fromBalance ? fromBalance.amount : 0}`,
+        );
+      }
+
+      let toBalance = await queryRunner.manager
+        .createQueryBuilder(Balance, 'balance')
+        .setLock('pessimistic_write')
+        .where('balance.walletId = :walletId AND balance.currency = :currency', {
+          walletId: wallet.id,
+          currency: to,
+        })
+        .getOne();
+
+      if (!toBalance) {
+        toBalance = queryRunner.manager.create(Balance, {
+          walletId: wallet.id,
+          currency: to,
+          amount: 0,
+        });
+        toBalance = await queryRunner.manager.save(toBalance);
+      }
+
+      const fromBefore = Number(fromBalance.amount);
+      const fromAfter = Math.round((fromBefore - amount) * 10000) / 10000;
+      const toBefore = Number(toBalance.amount);
+      const toAfter = Math.round((toBefore + convertedAmount) * 10000) / 10000;
+
+      await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
+      await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
+
+      const debitLog = queryRunner.manager.create(TransactionLog, {
+        walletId: wallet.id,
+        type: TransactionType.DEBIT,
+        purpose: TransactionPurpose.EXCHANGE,
+        currency: from,
+        amount,
+        balanceBefore: fromBefore,
+        balanceAfter: fromAfter,
+        idempotencyKey: debitKey,
+        status: TransactionStatus.SUCCESS,
+      });
+
+      const creditLog = queryRunner.manager.create(TransactionLog, {
+        walletId: wallet.id,
+        type: TransactionType.CREDIT,
+        purpose: TransactionPurpose.EXCHANGE,
+        currency: to,
+        amount: convertedAmount,
+        balanceBefore: toBefore,
+        balanceAfter: toAfter,
+        idempotencyKey: creditKey,
+        status: TransactionStatus.SUCCESS,
+      });
+
+      await queryRunner.manager.save(debitLog);
+      await queryRunner.manager.save(creditLog);
+      await queryRunner.commitTransaction();
+
+      return {
+        message: 'Conversion successful',
+        rateVersion: rates.version,
+        exchangeRate,
+        debit: debitLog,
+        credit: creditLog,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('Failed to convert funds');
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async tradeFunds(
+    userId: string,
+    fromCurrency: string,
+    toCurrency: string,
+    amount: number,
+    idempotencyKey: string,
+  ) {
+    return this.convertFunds(userId, fromCurrency, toCurrency, amount, idempotencyKey);
   }
 }
