@@ -28,6 +28,10 @@ import { User } from './users/user.entity.js';
         autoLoadEntities: true,
         synchronize: configService.get<boolean>('DB_SYNC'),
         entities: [User],
+        extra: {
+          max: configService.get<number>('DB_POOL_MAX'),
+          min: configService.get<number>('DB_POOL_MIN'),
+        },
       }),
       inject: [ConfigService],
     }),

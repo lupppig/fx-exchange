@@ -7,6 +7,8 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
   DATABASE_URL: Joi.string().required(),
   DB_SYNC: Joi.boolean().default(false),
+  DB_POOL_MAX: Joi.number().default(20),
+  DB_POOL_MIN: Joi.number().default(5),
   REDIS_URL: Joi.string().required(),
   JWT_SECRET: Joi.string().required(),
   GLOBAL_PREFIX: Joi.string().default('api'),
