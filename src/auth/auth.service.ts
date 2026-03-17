@@ -1,11 +1,13 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { Redis } from 'ioredis';
+import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { VerifyOtpDto } from './dto/verify-otp.dto.js';
+import { SigninDto } from './dto/signin.dto.js';
 import { MailService } from '../common/mail/mail.service.js';
 
 @Injectable()
@@ -15,6 +17,7 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
+    private readonly jwtService: JwtService,
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
@@ -76,5 +79,26 @@ export class AuthService {
     await this.redis.del(attemptsKey);
 
     return { message: 'Email verified successfully' };
+  }
+
+  async signin(dto: SigninDto) {
+    const user = await this.usersService.findByEmailWithPassword(dto.email);
+    if (!user || !user.passwordHash) {
+      throw new BadRequestException('Invalid credentials');
+    }
+
+    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new BadRequestException('Invalid credentials');
+    }
+
+    if (!user.isVerified) {
+      throw new BadRequestException('Please verify your email first');
+    }
+
+    const payload = { sub: user.id, email: user.email };
+    return {
+      access_token: await this.jwtService.signAsync(payload),
+    };
   }
 }
