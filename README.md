@@ -107,19 +107,14 @@ All financial operations require **idempotency keys**
 
 ---
 
-# System Flow (FX Conversion)
+### API Documentation
 
-1. Client sends request with idempotency key
-2. Transaction created (`PENDING`)
-3. FX rate fetched from Redis
-4. Wallet balances locked (`FOR UPDATE`)
-5. Ledger entries created (DEBIT + CREDIT)
-6. Balances updated
-7. Transaction marked `SUCCESS`
-
-If any step fails → rollback
+*   **Local**: [http://localhost:3000/api/docs](http://localhost:3000/api/docs)
+*   **Production**: [https://domestic-ilene-ubermensch-21108bde.koyeb.app/api/docs](https://domestic-ilene-ubermensch-21108bde.koyeb.app/api/docs)
 
 ---
+
+# Challenges & How They Were Solved
 
 # Challenges & How They Were Solved
 
