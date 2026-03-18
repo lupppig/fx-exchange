@@ -5,6 +5,7 @@ import { WalletService } from './wallet.service.js';
 import { Wallet } from './entities/wallet.entity.js';
 import { Balance } from './entities/balance.entity.js';
 import { TransactionStatus } from '../transactions/enums/transaction-status.enum.js';
+import { TransactionType } from '../transactions/enums/transaction-type.enum.js';
 import { FxService } from '../fx/fx.service.js';
 import { TransactionsService } from '../transactions/transactions.service.js';
 import { LockService } from '../common/lock/lock.service.js';
@@ -62,8 +63,8 @@ describe('WalletService', () => {
         {
           provide: TransactionsService,
           useValue: {
-            recordTransaction: jest.fn(),
-            updateTransaction: jest.fn(),
+            recordJournalEntry: jest.fn(),
+            updateJournalStatus: jest.fn(),
             findByIdempotencyKey: jest.fn(),
           },
         },
@@ -129,8 +130,12 @@ describe('WalletService', () => {
 
   describe('fundWallet', () => {
     it('should return gracefully for processed idempotent transaction', async () => {
-      const log = { id: 'log-1', status: TransactionStatus.SUCCESS, currency: 'NGN', amount: 100000, balanceAfter: 200000 };
-      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(log as any);
+      const journal = {
+        id: 'journal-1',
+        status: TransactionStatus.SUCCESS,
+        entries: [{ type: TransactionType.CREDIT, currency: 'NGN', amount: 100000 }],
+      };
+      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(journal as any);
 
       const result = await service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key');
 
@@ -139,16 +144,19 @@ describe('WalletService', () => {
     });
 
     it('should fail if transaction is PENDING', async () => {
-      const log = { id: 'log-1', status: TransactionStatus.PENDING };
-      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(log as any);
+      const journal = { id: 'journal-1', status: TransactionStatus.PENDING };
+      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(journal as any);
 
       await expect(service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key'))
         .rejects.toThrow('Transaction is currently being processed');
     });
 
-    it('should successfully fund wallet with state transitions', async () => {
+    it('should create journal entry with CREDIT entry and update on success', async () => {
       jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(null);
-      jest.spyOn(transactionsService, 'recordTransaction').mockResolvedValue({ id: 'log-pending' } as any);
+      jest.spyOn(transactionsService, 'recordJournalEntry').mockResolvedValue({
+        id: 'journal-pending',
+        entries: [{ id: 'entry-credit', type: TransactionType.CREDIT }],
+      } as any);
       
       const wallet = { id: mockWalletId, userId: mockUserId };
       jest.spyOn(walletRepo, 'findOne').mockResolvedValue(wallet as any);
@@ -165,15 +173,22 @@ describe('WalletService', () => {
 
       const result = await service.fundWallet(mockUserId, 'NGN', 50000, 'idem-key');
 
-      expect(transactionsService.recordTransaction).toHaveBeenCalled();
-      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-pending', expect.objectContaining({ status: TransactionStatus.SUCCESS }));
+      expect(transactionsService.recordJournalEntry).toHaveBeenCalled();
+      expect(transactionsService.updateJournalStatus).toHaveBeenCalledWith(
+        'journal-pending',
+        TransactionStatus.SUCCESS,
+        [expect.objectContaining({ entryId: 'entry-credit' })],
+      );
       expect(result.message).toBe('Wallet funded successfully');
     });
 
-    it('should update status to FAILED on error', async () => {
+    it('should update journal status to FAILED on error', async () => {
       jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(null);
       jest.spyOn(walletRepo, 'findOne').mockResolvedValue({ id: mockWalletId } as any);
-      jest.spyOn(transactionsService, 'recordTransaction').mockResolvedValue({ id: 'log-pending' } as any);
+      jest.spyOn(transactionsService, 'recordJournalEntry').mockResolvedValue({
+        id: 'journal-pending',
+        entries: [{ id: 'entry-credit' }],
+      } as any);
 
       jest.spyOn(manager, 'createQueryBuilder').mockImplementation(() => {
         throw new Error('DB Error');
@@ -182,16 +197,23 @@ describe('WalletService', () => {
       await expect(service.fundWallet(mockUserId, 'NGN', 10000, 'idem-key')).rejects.toThrow();
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
-      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-pending', { status: TransactionStatus.FAILED });
+      expect(transactionsService.updateJournalStatus).toHaveBeenCalledWith(
+        'journal-pending',
+        TransactionStatus.FAILED,
+      );
     });
   });
 
   describe('convertFunds', () => {
-    it('should successfully convert within a transaction', async () => {
+    it('should create journal with paired DEBIT + CREDIT entries', async () => {
       jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(null);
-      jest.spyOn(transactionsService, 'recordTransaction')
-        .mockResolvedValueOnce({ id: 'log-debit' } as any)
-        .mockResolvedValueOnce({ id: 'log-credit' } as any);
+      jest.spyOn(transactionsService, 'recordJournalEntry').mockResolvedValue({
+        id: 'journal-conv',
+        entries: [
+          { id: 'entry-debit', type: TransactionType.DEBIT },
+          { id: 'entry-credit', type: TransactionType.CREDIT },
+        ],
+      } as any);
 
       jest.spyOn(fxService, 'getRates').mockResolvedValue({
         version: 'v1',
@@ -213,9 +235,15 @@ describe('WalletService', () => {
       const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 200000, 'idem-key');
 
       expect(result.status).toBe(TransactionStatus.SUCCESS);
-      expect(transactionsService.recordTransaction).toHaveBeenCalledTimes(2);
-      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-debit', expect.anything());
-      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-credit', expect.anything());
+      expect(transactionsService.recordJournalEntry).toHaveBeenCalledTimes(1);
+      expect(transactionsService.updateJournalStatus).toHaveBeenCalledWith(
+        'journal-conv',
+        TransactionStatus.SUCCESS,
+        expect.arrayContaining([
+          expect.objectContaining({ entryId: 'entry-debit' }),
+          expect.objectContaining({ entryId: 'entry-credit' }),
+        ]),
+      );
     });
   });
 });

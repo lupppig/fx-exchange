@@ -12,7 +12,7 @@ import { TransactionStatus } from '../transactions/enums/transaction-status.enum
 import { FxService } from '../fx/fx.service.js';
 import { getSubunitFactor } from './utils/currency.util.js';
 import { isSupportedCurrency } from '../common/constants/supported-currencies.js';
-import { TransactionLog } from '../transactions/entities/transaction-log.entity.js';
+import { JournalEntry } from '../transactions/entities/journal-entry.entity.js';
 import { TransactionsService } from '../transactions/transactions.service.js';
 import { LockService } from '../common/lock/lock.service.js';
 import { WalletResponseDto } from './dto/wallet-response.dto.js';
@@ -73,6 +73,7 @@ export class WalletService {
 
   /**
    * Funds a wallet with a specified currency.
+   * Creates a journal entry with a single CREDIT ledger entry.
    */
   async fundWallet(userId: string, currency: string, amount: number, idempotencyKey: string) {
     const normalizedCurrency = currency.toUpperCase();
@@ -91,7 +92,7 @@ export class WalletService {
         return {
           message: 'Wallet funded successfully (idempotent)',
           status: TransactionStatus.SUCCESS,
-          transaction: plainToInstance(TransactionLog, existing),
+          journal: plainToInstance(JournalEntry, existing),
         };
       }
       if (existing.status === TransactionStatus.PENDING) {
@@ -102,7 +103,6 @@ export class WalletService {
       }
     }
 
-    //  Early Claim (PENDING status)
     return this.lockService.acquire(`wallet:${userId}`, 10000, async () => {
       let wallet = await this.walletRepository.findOne({ where: { userId } });
       if (!wallet) {
@@ -110,18 +110,25 @@ export class WalletService {
         wallet = await this.walletRepository.save(wallet);
       }
 
-      const pendingLog = await this.transactionsService.recordTransaction({
+      // Create PENDING journal with a single CREDIT entry
+      const pendingJournal = await this.transactionsService.recordJournalEntry({
         walletId: wallet.id,
         userId,
-        type: TransactionType.CREDIT,
         purpose: TransactionPurpose.FUNDING,
-        currency: normalizedCurrency,
-        amount,
-        balanceBefore: 0,
-        balanceAfter: 0,
         idempotencyKey,
         status: TransactionStatus.PENDING,
+        entries: [{
+          walletId: wallet.id,
+          userId,
+          type: TransactionType.CREDIT,
+          currency: normalizedCurrency,
+          amount,
+          balanceBefore: 0,
+          balanceAfter: 0,
+        }],
       });
+
+      const creditEntry = pendingJournal.entries[0];
 
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -152,34 +159,36 @@ export class WalletService {
 
         await queryRunner.manager.update(Balance, balance.id, { amount: balanceAfter });
 
-        await this.transactionsService.updateTransaction(
-          pendingLog.id,
-          {
-            balanceBefore,
-            balanceAfter,
-            status: TransactionStatus.SUCCESS,
-          },
-        );
-
         await queryRunner.commitTransaction();
+
+        // Update journal + entry with final balances and SUCCESS status
+        await this.transactionsService.updateJournalStatus(
+          pendingJournal.id,
+          TransactionStatus.SUCCESS,
+          [{ entryId: creditEntry.id, balanceBefore, balanceAfter }],
+        );
 
         await this.redis.del(`wallet:balances:${userId}`).catch(() => {});
 
         return {
           message: 'Wallet funded successfully',
           status: TransactionStatus.SUCCESS,
-          transaction: plainToInstance(TransactionLog, {
-            ...pendingLog,
-            balanceBefore,
-            balanceAfter,
+          journal: plainToInstance(JournalEntry, {
+            ...pendingJournal,
             status: TransactionStatus.SUCCESS,
+            entries: [{
+              ...creditEntry,
+              balanceBefore,
+              balanceAfter,
+            }],
           }),
         };
       } catch (error) {
         await queryRunner.rollbackTransaction();
-        await this.transactionsService.updateTransaction(pendingLog.id, {
-          status: TransactionStatus.FAILED,
-        });
+        await this.transactionsService.updateJournalStatus(
+          pendingJournal.id,
+          TransactionStatus.FAILED,
+        );
         if (error instanceof BadRequestException) throw error;
         throw new BadRequestException('Failed to fund wallet');
       } finally {
@@ -190,6 +199,7 @@ export class WalletService {
 
   /**
    * Converts funds between two currencies.
+   * Creates a journal entry with a DEBIT + CREDIT ledger entry pair.
    */
   async convertFunds(
     userId: string,
@@ -217,25 +227,20 @@ export class WalletService {
       throw new BadRequestException('Amount must be a positive integer in smallest currency unit');
     }
 
-    const debitKey = `${idempotencyKey}:debit`;
-    const creditKey = `${idempotencyKey}:credit`;
-
-    const existingDebit = await this.transactionsService.findByIdempotencyKey(userId, debitKey);
-    if (existingDebit) {
-      if (existingDebit.status === TransactionStatus.SUCCESS) {
-        const existingCredit = await this.transactionsService.findByIdempotencyKey(userId, creditKey);
+    const existing = await this.transactionsService.findByIdempotencyKey(userId, idempotencyKey);
+    if (existing) {
+      if (existing.status === TransactionStatus.SUCCESS) {
         return {
           message: 'Conversion successful (idempotent)',
-          status: existingDebit.status,
-          exchangeRate: Number(existingDebit.exchangeRate),
-          debit: existingDebit,
-          credit: existingCredit,
+          status: existing.status,
+          exchangeRate: Number(existing.exchangeRate),
+          journal: plainToInstance(JournalEntry, existing),
         };
       }
-      if (existingDebit.status === TransactionStatus.PENDING) {
+      if (existing.status === TransactionStatus.PENDING) {
         throw new BadRequestException('Conversion is currently being processed. Please wait.');
       }
-      if (existingDebit.status === TransactionStatus.FAILED) {
+      if (existing.status === TransactionStatus.FAILED) {
         throw new BadRequestException('Conversion previously failed. Please use a new idempotency key.');
       }
     }
@@ -260,33 +265,40 @@ export class WalletService {
         wallet = await this.walletRepository.save(wallet);
       }
 
-      const pendingDebit = await this.transactionsService.recordTransaction({
+      const purpose = context === 'trade' ? TransactionPurpose.TRADE : TransactionPurpose.EXCHANGE;
+
+      // Create PENDING journal with DEBIT + CREDIT entries
+      const pendingJournal = await this.transactionsService.recordJournalEntry({
         walletId: wallet.id,
         userId,
-        type: TransactionType.DEBIT,
-        purpose: context === 'trade' ? TransactionPurpose.TRADE : TransactionPurpose.EXCHANGE,
-        currency: fromCurrency,
-        amount,
-        balanceBefore: 0,
-        balanceAfter: 0,
+        purpose,
+        idempotencyKey,
         exchangeRate,
-        idempotencyKey: debitKey,
         status: TransactionStatus.PENDING,
+        entries: [
+          {
+            walletId: wallet.id,
+            userId,
+            type: TransactionType.DEBIT,
+            currency: fromCurrency,
+            amount,
+            balanceBefore: 0,
+            balanceAfter: 0,
+          },
+          {
+            walletId: wallet.id,
+            userId,
+            type: TransactionType.CREDIT,
+            currency: toCurrency,
+            amount: convertedAmount,
+            balanceBefore: 0,
+            balanceAfter: 0,
+          },
+        ],
       });
 
-      const pendingCredit = await this.transactionsService.recordTransaction({
-        walletId: wallet.id,
-        userId,
-        type: TransactionType.CREDIT,
-        purpose: context === 'trade' ? TransactionPurpose.TRADE : TransactionPurpose.EXCHANGE,
-        currency: toCurrency,
-        amount: convertedAmount,
-        balanceBefore: 0,
-        balanceAfter: 0,
-        exchangeRate,
-        idempotencyKey: creditKey,
-        status: TransactionStatus.PENDING,
-      });
+      const debitEntry = pendingJournal.entries[0];
+      const creditEntry = pendingJournal.entries[1];
 
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -332,17 +344,17 @@ export class WalletService {
         await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
         await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
 
-        await this.transactionsService.updateTransaction(
-          pendingDebit.id,
-          { balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
-        );
-
-        await this.transactionsService.updateTransaction(
-          pendingCredit.id,
-          { balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
-        );
-
         await queryRunner.commitTransaction();
+
+        // Update journal + entries with final balances and SUCCESS status
+        await this.transactionsService.updateJournalStatus(
+          pendingJournal.id,
+          TransactionStatus.SUCCESS,
+          [
+            { entryId: debitEntry.id, balanceBefore: fromBefore, balanceAfter: fromAfter },
+            { entryId: creditEntry.id, balanceBefore: toBefore, balanceAfter: toAfter },
+          ],
+        );
 
         await this.redis.del(`wallet:balances:${userId}`).catch(() => {});
 
@@ -351,13 +363,21 @@ export class WalletService {
           status: TransactionStatus.SUCCESS,
           rateVersion: rates.version,
           exchangeRate,
-          debit: plainToInstance(TransactionLog, { ...pendingDebit, balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS }),
-          credit: plainToInstance(TransactionLog, { ...pendingCredit, balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS }),
+          journal: plainToInstance(JournalEntry, {
+            ...pendingJournal,
+            status: TransactionStatus.SUCCESS,
+            entries: [
+              { ...debitEntry, balanceBefore: fromBefore, balanceAfter: fromAfter },
+              { ...creditEntry, balanceBefore: toBefore, balanceAfter: toAfter },
+            ],
+          }),
         };
       } catch (error) {
         await queryRunner.rollbackTransaction();
-        await this.transactionsService.updateTransaction(pendingDebit.id, { status: TransactionStatus.FAILED });
-        await this.transactionsService.updateTransaction(pendingCredit.id, { status: TransactionStatus.FAILED });
+        await this.transactionsService.updateJournalStatus(
+          pendingJournal.id,
+          TransactionStatus.FAILED,
+        );
         if (error instanceof BadRequestException) throw error;
         throw new BadRequestException('Failed to convert funds');
       } finally {

@@ -4,75 +4,98 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ClientProxy } from '@nestjs/microservices';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-import { TransactionLog } from './entities/transaction-log.entity.js';
+import { JournalEntry } from './entities/journal-entry.entity.js';
 import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
 import { TransactionStatus } from './enums/transaction-status.enum.js';
 
-export interface RecordTransactionOptions {
+export interface LedgerEntryInput {
   walletId: string;
   userId: string;
   type: TransactionType;
-  purpose: TransactionPurpose;
   currency: string;
   amount: number;
   balanceBefore: number;
   balanceAfter: number;
+}
+
+export interface RecordJournalOptions {
+  walletId: string;
+  userId: string;
+  purpose: TransactionPurpose;
   idempotencyKey: string;
   status?: TransactionStatus;
   exchangeRate?: number;
-  metadata?: any;
+  entries: LedgerEntryInput[];
 }
 
 @Injectable()
 export class TransactionsService {
   constructor(
-    @InjectRepository(TransactionLog)
-    private readonly repo: Repository<TransactionLog>,
+    @InjectRepository(JournalEntry)
+    private readonly journalRepo: Repository<JournalEntry>,
     @Inject('TRANSACTIONS_SERVICE') private readonly client: ClientProxy,
   ) {}
 
   /**
-   * Records a new transaction in the ledger asynchronously.
+   * Records a journal entry with its linked ledger entries asynchronously via RabbitMQ.
+   * Returns the journal entry immediately for a fast API response.
    */
-  async recordTransaction(
-    options: RecordTransactionOptions,
-  ): Promise<TransactionLog> {
-    const id = uuidv4();
-    const logData = {
-      ...options,
-      id,
-      status: options.status ?? TransactionStatus.SUCCESS,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+  async recordJournalEntry(
+    options: RecordJournalOptions,
+  ): Promise<JournalEntry> {
+    const journalId = uuidv4();
+    const now = new Date();
+
+    const entries = options.entries.map((entry) => ({
+      ...entry,
+      id: uuidv4(),
+      journalEntryId: journalId,
+      createdAt: now,
+    }));
+
+    const journalData = {
+      id: journalId,
+      walletId: options.walletId,
+      userId: options.userId,
+      purpose: options.purpose,
+      status: options.status ?? TransactionStatus.PENDING,
+      idempotencyKey: options.idempotencyKey,
+      exchangeRate: options.exchangeRate ?? null,
+      entries,
+      createdAt: now,
+      updatedAt: now,
     };
 
-    this.client.emit('record_transaction', logData);
+    this.client.emit('record_journal', journalData);
 
-    return plainToInstance(TransactionLog, logData);
-  }
-
-  /*
-   * Updates the status or details of an existing transaction asynchronously.
-   */
-  async updateTransaction(
-    id: string,
-    update: Partial<TransactionLog>,
-  ): Promise<void> {
-    this.client.emit('update_transaction', { id, update });
+    return plainToInstance(JournalEntry, journalData);
   }
 
   /**
-   * Finds a transaction by its idempotency key.
+   * Updates the status of a journal entry asynchronously via RabbitMQ.
    */
-  async findByIdempotencyKey(userId: string, key: string): Promise<TransactionLog | null> {
-    return this.repo.findOne({
+  async updateJournalStatus(
+    journalId: string,
+    status: TransactionStatus,
+    entryUpdates?: { entryId: string; balanceBefore: number; balanceAfter: number }[],
+  ): Promise<void> {
+    this.client.emit('update_journal', { journalId, status, entryUpdates });
+  }
+
+  /**
+   * Finds a journal entry by its idempotency key (synchronous DB read).
+   */
+  async findByIdempotencyKey(userId: string, key: string): Promise<JournalEntry | null> {
+    return this.journalRepo.findOne({
       where: { userId, idempotencyKey: key },
+      relations: ['entries'],
     });
   }
 
   /**
-   * Fetches transaction history for a user with cursor-based pagination and advanced filtering.
+   * Fetches transaction history for a user with cursor-based pagination and filtering.
+   * Queries journal entries with their linked ledger entries.
    */
   async getTransactions(
     userId: string,
@@ -86,32 +109,33 @@ export class TransactionsService {
   ) {
     const { cursor, limit = 20, currency, type, purpose } = query;
 
-    const qb = this.repo
-      .createQueryBuilder('txn')
-      .where('txn.userId = :userId', { userId })
-      .orderBy('txn.createdAt', 'DESC')
+    const qb = this.journalRepo
+      .createQueryBuilder('journal')
+      .leftJoinAndSelect('journal.entries', 'entry')
+      .where('journal.userId = :userId', { userId })
+      .orderBy('journal.createdAt', 'DESC')
       .take(limit + 1);
 
     if (cursor) {
-      qb.andWhere('txn.createdAt < :cursor', { cursor });
+      qb.andWhere('journal.createdAt < :cursor', { cursor });
     }
 
     if (currency) {
-      qb.andWhere('txn.currency = :currency', { currency: currency.toUpperCase() });
+      qb.andWhere('entry.currency = :currency', { currency: currency.toUpperCase() });
     }
 
     if (type) {
-      qb.andWhere('txn.type = :type', { type });
+      qb.andWhere('entry.type = :type', { type });
     }
 
     if (purpose) {
-      qb.andWhere('txn.purpose = :purpose', { purpose });
+      qb.andWhere('journal.purpose = :purpose', { purpose });
     }
 
-    const txns = await qb.getMany();
+    const journals = await qb.getMany();
 
-    const hasNextPage = txns.length > limit;
-    const items = hasNextPage ? txns.slice(0, limit) : txns;
+    const hasNextPage = journals.length > limit;
+    const items = hasNextPage ? journals.slice(0, limit) : journals;
     const nextCursor = hasNextPage ? items[items.length - 1].createdAt.toISOString() : null;
 
     return {
