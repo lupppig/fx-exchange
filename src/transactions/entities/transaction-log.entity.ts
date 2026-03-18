@@ -30,12 +30,15 @@ export class TransactionLog {
   userId!: string;
 
   @Column({ type: 'enum', enum: TransactionType })
+  @Index()
   type!: TransactionType;
 
   @Column({ type: 'enum', enum: TransactionPurpose })
+  @Index()
   purpose!: TransactionPurpose;
 
   @Column({ length: 3, nullable: false })
+  @Index()
   currency!: string;
 
   @Column({ type: 'bigint' })
