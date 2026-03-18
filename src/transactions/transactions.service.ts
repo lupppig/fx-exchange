@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { ClientProxy } from '@nestjs/microservices';
+import { Repository } from 'typeorm';
+import { v4 as uuidv4 } from 'uuid';
 import { TransactionLog } from './entities/transaction-log.entity.js';
 import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
@@ -25,41 +27,46 @@ export interface RecordTransactionOptions {
 export class TransactionsService {
   constructor(
     @InjectRepository(TransactionLog)
-    private readonly transactionLogRepository: Repository<TransactionLog>,
+    private readonly repo: Repository<TransactionLog>,
+    @Inject('TRANSACTIONS_SERVICE') private readonly client: ClientProxy,
   ) {}
 
   /**
-   * Records a new transaction in the ledger.
+   * Records a new transaction in the ledger asynchronously.
    */
   async recordTransaction(
     options: RecordTransactionOptions,
-    manager?: EntityManager,
   ): Promise<TransactionLog> {
-    const repo = manager ? manager.getRepository(TransactionLog) : this.transactionLogRepository;
-    const log = repo.create({
+    const id = uuidv4();
+    const log = {
       ...options,
+      id,
       status: options.status ?? TransactionStatus.SUCCESS,
-    });
-    return repo.save(log);
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as TransactionLog;
+
+    // Emit to RabbitMQ for buffered write
+    this.client.emit('record_transaction', log);
+
+    return log;
   }
 
   /**
-   * Updates the status or details of an existing transaction.
+   * Updates the status or details of an existing transaction asynchronously.
    */
   async updateTransaction(
     id: string,
     update: Partial<TransactionLog>,
-    manager?: EntityManager,
   ): Promise<void> {
-    const repo = manager ? manager.getRepository(TransactionLog) : this.transactionLogRepository;
-    await repo.update(id, update);
+    this.client.emit('update_transaction', { id, update });
   }
 
   /**
    * Finds a transaction by its idempotency key.
    */
   async findByIdempotencyKey(key: string): Promise<TransactionLog | null> {
-    return this.transactionLogRepository.findOne({ where: { idempotencyKey: key } });
+    return this.repo.findOne({ where: { idempotencyKey: key } });
   }
 
   /**
@@ -77,7 +84,7 @@ export class TransactionsService {
   ) {
     const { cursor, limit = 20, currency, type, purpose } = query;
 
-    const qb = this.transactionLogRepository
+    const qb = this.repo
       .createQueryBuilder('txn')
       .where('txn.userId = :userId', { userId })
       .orderBy('txn.createdAt', 'DESC')

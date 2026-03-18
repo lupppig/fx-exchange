@@ -3,6 +3,7 @@ import { ValidationPipe, VersioningType, HttpStatus, BadRequestException } from 
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { Transport } from '@nestjs/microservices';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter.js';
@@ -11,6 +12,21 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+
+  // Hybrid App: Connect RabbitMQ Microservice
+  app.connectMicroservice({
+    transport: Transport.RMQ,
+    options: {
+      urls: [configService.get<string>('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672')],
+      queue: 'transaction_logs',
+      queueOptions: {
+        durable: true,
+      },
+      noAck: false, // Important for manual acknowledgment in consumer
+    },
+  });
+
+  await app.startAllMicroservices();
   
   app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
 

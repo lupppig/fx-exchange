@@ -163,7 +163,6 @@ export class WalletService {
             balanceAfter,
             status: TransactionStatus.SUCCESS,
           },
-          queryRunner.manager,
         );
 
         await queryRunner.commitTransaction();
@@ -342,13 +341,11 @@ export class WalletService {
         await this.transactionsService.updateTransaction(
           pendingDebit.id,
           { balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
-          queryRunner.manager,
         );
 
         await this.transactionsService.updateTransaction(
           pendingCredit.id,
           { balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
-          queryRunner.manager,
         );
 
         await queryRunner.commitTransaction();
