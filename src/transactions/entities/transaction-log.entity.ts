@@ -64,5 +64,6 @@ export class TransactionLog {
   createdAt!: Date;
 
   @UpdateDateColumn()
+  @Index()
   updatedAt!: Date;
 }

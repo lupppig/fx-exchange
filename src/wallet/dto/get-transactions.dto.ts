@@ -7,7 +7,7 @@ import { TransactionPurpose } from '../../transactions/enums/transaction-purpose
 
 export class GetTransactionsDto {
   @ApiPropertyOptional({
-    description: 'Cursor for pagination (ISO 8601 timestamp)',
+    description: 'cursor timestamp pagination',
   })
   @IsOptional()
   @IsISO8601()
