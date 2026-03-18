@@ -1,27 +1,29 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, LessThan } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity.js';
 import { Balance } from './entities/balance.entity.js';
-import { TransactionLog } from './entities/transaction-log.entity.js';
-import { TransactionType } from './enums/transaction-type.enum.js';
-import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
-import { TransactionStatus } from './enums/transaction-status.enum.js';
+import { TransactionType } from '../transactions/enums/transaction-type.enum.js';
+import { TransactionPurpose } from '../transactions/enums/transaction-purpose.enum.js';
+import { TransactionStatus } from '../transactions/enums/transaction-status.enum.js';
 import { FxService } from '../fx/fx.service.js';
 import { getSubunitFactor } from './utils/currency.util.js';
 import { isSupportedCurrency } from '../common/constants/supported-currencies.js';
+import { TransactionsService } from '../transactions/transactions.service.js';
 
 @Injectable()
 export class WalletService {
   constructor(
     @InjectRepository(Wallet)
     private readonly walletRepository: Repository<Wallet>,
-    @InjectRepository(TransactionLog)
-    private readonly transactionLogRepository: Repository<TransactionLog>,
+    private readonly transactionsService: TransactionsService,
     private readonly dataSource: DataSource,
     private readonly fxService: FxService,
   ) {}
 
+  /**
+   * Fetches or creates a wallet for a user.
+   */
   async getWallet(userId: string) {
     let wallet = await this.walletRepository.findOne({
       where: { userId },
@@ -42,6 +44,9 @@ export class WalletService {
     };
   }
 
+  /**
+   * Funds a wallet with a specified currency.
+   */
   async fundWallet(userId: string, currency: string, amount: number, idempotencyKey: string) {
     const normalizedCurrency = currency.toUpperCase();
 
@@ -53,49 +58,46 @@ export class WalletService {
       throw new BadRequestException('Amount must be a positive integer in smallest currency unit');
     }
 
-    // 1. Check existing state
-    const existingLog = await this.transactionLogRepository.findOne({
-      where: { idempotencyKey },
-    });
-
-    if (existingLog) {
-      if (existingLog.status === TransactionStatus.SUCCESS) {
+    // 1. Idempotency check
+    const existing = await this.transactionsService.findByIdempotencyKey(idempotencyKey);
+    if (existing) {
+      if (existing.status === TransactionStatus.SUCCESS) {
         return {
-          message: 'Transaction already processed',
-          status: existingLog.status,
-          transaction: existingLog,
+          message: 'Wallet funded successfully (idempotent)',
+          currency: existing.currency,
+          amount: Number(existing.amount),
+          newBalance: Number(existing.balanceAfter),
         };
       }
-      if (existingLog.status === TransactionStatus.PENDING) {
+      if (existing.status === TransactionStatus.PENDING) {
         throw new BadRequestException('Transaction is currently being processed. Please wait.');
       }
-      if (existingLog.status === TransactionStatus.FAILED) {
+      if (existing.status === TransactionStatus.FAILED) {
         throw new BadRequestException('Transaction previously failed. Please use a new idempotency key.');
       }
     }
 
     // 2. Early Claim (PENDING status)
-    // We need a walletId for the log. Ensure wallet exists first.
     let wallet = await this.walletRepository.findOne({ where: { userId } });
     if (!wallet) {
       wallet = this.walletRepository.create({ userId });
       wallet = await this.walletRepository.save(wallet);
     }
 
-    const pendingLog = this.transactionLogRepository.create({
+    const pendingLog = await this.transactionsService.recordTransaction({
       walletId: wallet.id,
       userId,
       type: TransactionType.CREDIT,
       purpose: TransactionPurpose.FUNDING,
       currency: normalizedCurrency,
       amount,
-      balanceBefore: 0, // Will be updated
-      balanceAfter: 0,  // Will be updated
+      balanceBefore: 0,
+      balanceAfter: 0,
       idempotencyKey,
       status: TransactionStatus.PENDING,
     });
-    await this.transactionLogRepository.save(pendingLog);
 
+    // 3. Fund logic
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -125,26 +127,31 @@ export class WalletService {
 
       await queryRunner.manager.update(Balance, balance.id, { amount: balanceAfter });
 
-      // 3. Update log to SUCCESS
-      await queryRunner.manager.update(TransactionLog, pendingLog.id, {
-        balanceBefore,
-        balanceAfter,
-        status: TransactionStatus.SUCCESS,
-      });
+      // 4. Update log to SUCCESS
+      await this.transactionsService.updateTransaction(
+        pendingLog.id,
+        {
+          balanceBefore,
+          balanceAfter,
+          status: TransactionStatus.SUCCESS,
+        },
+        queryRunner.manager,
+      );
 
       await queryRunner.commitTransaction();
 
-      const finalLog = await this.transactionLogRepository.findOneOrFail({ where: { id: pendingLog.id } });
-
       return {
         message: 'Wallet funded successfully',
-        status: finalLog.status,
-        transaction: finalLog,
+        status: TransactionStatus.SUCCESS,
+        currency: normalizedCurrency,
+        amount,
+        newBalance: balanceAfter,
       };
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      await this.transactionLogRepository.update(pendingLog.id, { status: TransactionStatus.FAILED });
-      
+      await this.transactionsService.updateTransaction(pendingLog.id, {
+        status: TransactionStatus.FAILED,
+      });
       if (error instanceof BadRequestException) throw error;
       throw new BadRequestException('Failed to fund wallet');
     } finally {
@@ -152,26 +159,29 @@ export class WalletService {
     }
   }
 
+  /**
+   * Converts funds between two currencies.
+   */
   async convertFunds(
     userId: string,
-    fromCurrency: string,
-    toCurrency: string,
+    from: string,
+    to: string,
     amount: number,
     idempotencyKey: string,
     context: 'convert' | 'trade' = 'convert',
   ) {
-    const from = fromCurrency.toUpperCase();
-    const to = toCurrency.toUpperCase();
+    const fromCurrency = from.toUpperCase();
+    const toCurrency = to.toUpperCase();
 
-    if (from === to) {
+    if (fromCurrency === toCurrency) {
       throw new BadRequestException('Cannot convert to the same currency');
     }
 
-    if (!isSupportedCurrency(from)) {
-      throw new BadRequestException(`Unsupported currency: ${from}`);
+    if (!isSupportedCurrency(fromCurrency)) {
+      throw new BadRequestException(`Unsupported currency: ${fromCurrency}`);
     }
-    if (!isSupportedCurrency(to)) {
-      throw new BadRequestException(`Unsupported currency: ${to}`);
+    if (!isSupportedCurrency(toCurrency)) {
+      throw new BadRequestException(`Unsupported currency: ${toCurrency}`);
     }
 
     if (!Number.isInteger(amount) || amount <= 0) {
@@ -181,19 +191,15 @@ export class WalletService {
     const debitKey = `${idempotencyKey}:debit`;
     const creditKey = `${idempotencyKey}:credit`;
 
-    // 1. Check existing state
-    const existingDebit = await this.transactionLogRepository.findOne({
-      where: { idempotencyKey: debitKey },
-    });
-
+    // 1. Idempotency check
+    const existingDebit = await this.transactionsService.findByIdempotencyKey(debitKey);
     if (existingDebit) {
       if (existingDebit.status === TransactionStatus.SUCCESS) {
-        const existingCredit = await this.transactionLogRepository.findOne({
-          where: { idempotencyKey: creditKey },
-        });
+        const existingCredit = await this.transactionsService.findByIdempotencyKey(creditKey);
         return {
-          message: 'Conversion already processed',
+          message: 'Conversion successful (idempotent)',
           status: existingDebit.status,
+          exchangeRate: Number(existingDebit.exchangeRate),
           debit: existingDebit,
           credit: existingCredit,
         };
@@ -207,15 +213,10 @@ export class WalletService {
     }
 
     const rates = await this.fxService.getRates();
+    const exchangeRate = rates.rates[toCurrency] / rates.rates[fromCurrency];
 
-    if (!rates.rates[from] || !rates.rates[to]) {
-      throw new BadRequestException(`Unsupported currency pair: ${from}/${to}`);
-    }
-
-    const fromFactor = getSubunitFactor(from);
-    const toFactor = getSubunitFactor(to);
-    const exchangeRate = rates.rates[to] / rates.rates[from];
-
+    const fromFactor = getSubunitFactor(fromCurrency);
+    const toFactor = getSubunitFactor(toCurrency);
     const majorAmount = amount / fromFactor;
     const convertedMajor = majorAmount * exchangeRate;
     const convertedAmount = Math.round(convertedMajor * toFactor);
@@ -231,12 +232,12 @@ export class WalletService {
       wallet = await this.walletRepository.save(wallet);
     }
 
-    const pendingDebit = this.transactionLogRepository.create({
+    const pendingDebit = await this.transactionsService.recordTransaction({
       walletId: wallet.id,
       userId,
       type: TransactionType.DEBIT,
-      purpose: TransactionPurpose.EXCHANGE,
-      currency: from,
+      purpose: context === 'trade' ? TransactionPurpose.EXCHANGE : TransactionPurpose.EXCHANGE,
+      currency: fromCurrency,
       amount,
       balanceBefore: 0,
       balanceAfter: 0,
@@ -245,12 +246,12 @@ export class WalletService {
       status: TransactionStatus.PENDING,
     });
 
-    const pendingCredit = this.transactionLogRepository.create({
+    const pendingCredit = await this.transactionsService.recordTransaction({
       walletId: wallet.id,
       userId,
       type: TransactionType.CREDIT,
-      purpose: TransactionPurpose.EXCHANGE,
-      currency: to,
+      purpose: context === 'trade' ? TransactionPurpose.EXCHANGE : TransactionPurpose.EXCHANGE,
+      currency: toCurrency,
       amount: convertedAmount,
       balanceBefore: 0,
       balanceAfter: 0,
@@ -259,8 +260,7 @@ export class WalletService {
       status: TransactionStatus.PENDING,
     });
 
-    await this.transactionLogRepository.save([pendingDebit, pendingCredit]);
-
+    // 3. Execution logic
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -271,12 +271,12 @@ export class WalletService {
         .setLock('pessimistic_write')
         .where('balance.walletId = :walletId AND balance.currency = :currency', {
           walletId: wallet.id,
-          currency: from,
+          currency: fromCurrency,
         })
         .getOne();
 
       if (!fromBalance || Number(fromBalance.amount) < amount) {
-        throw new BadRequestException(`Insufficient ${from} balance`);
+        throw new BadRequestException(`Insufficient ${fromCurrency} balance`);
       }
 
       let toBalance = await queryRunner.manager
@@ -284,14 +284,14 @@ export class WalletService {
         .setLock('pessimistic_write')
         .where('balance.walletId = :walletId AND balance.currency = :currency', {
           walletId: wallet.id,
-          currency: to,
+          currency: toCurrency,
         })
         .getOne();
 
       if (!toBalance) {
         toBalance = queryRunner.manager.create(Balance, {
           walletId: wallet.id,
-          currency: to,
+          currency: toCurrency,
           amount: 0,
         });
         toBalance = await queryRunner.manager.save(toBalance);
@@ -305,39 +305,33 @@ export class WalletService {
       await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
       await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
 
-      // 3. Update logs to SUCCESS
-      await queryRunner.manager.update(TransactionLog, pendingDebit.id, {
-        balanceBefore: fromBefore,
-        balanceAfter: fromAfter,
-        status: TransactionStatus.SUCCESS,
-      });
+      // 4. Update logs to SUCCESS
+      await this.transactionsService.updateTransaction(
+        pendingDebit.id,
+        { balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
+        queryRunner.manager,
+      );
 
-      await queryRunner.manager.update(TransactionLog, pendingCredit.id, {
-        balanceBefore: toBefore,
-        balanceAfter: toAfter,
-        status: TransactionStatus.SUCCESS,
-      });
+      await this.transactionsService.updateTransaction(
+        pendingCredit.id,
+        { balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
+        queryRunner.manager,
+      );
 
       await queryRunner.commitTransaction();
 
-      const finalDebit = await this.transactionLogRepository.findOneOrFail({ where: { id: pendingDebit.id } });
-      const finalCredit = await this.transactionLogRepository.findOneOrFail({ where: { id: pendingCredit.id } });
-
       return {
         message: 'Conversion successful',
-        status: finalDebit.status,
+        status: TransactionStatus.SUCCESS,
         rateVersion: rates.version,
         exchangeRate,
-        debit: finalDebit,
-        credit: finalCredit,
+        debit: { ...pendingDebit, balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
+        credit: { ...pendingCredit, balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
       };
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      await this.transactionLogRepository.update(
-        [pendingDebit.id, pendingCredit.id],
-        { status: TransactionStatus.FAILED }
-      );
-      
+      await this.transactionsService.updateTransaction(pendingDebit.id, { status: TransactionStatus.FAILED });
+      await this.transactionsService.updateTransaction(pendingCredit.id, { status: TransactionStatus.FAILED });
       if (error instanceof BadRequestException) throw error;
       throw new BadRequestException('Failed to convert funds');
     } finally {
@@ -345,6 +339,9 @@ export class WalletService {
     }
   }
 
+  /**
+   * Alias for convertFunds with 'trade' context.
+   */
   async tradeFunds(
     userId: string,
     fromCurrency: string,
@@ -353,37 +350,5 @@ export class WalletService {
     idempotencyKey: string,
   ) {
     return this.convertFunds(userId, fromCurrency, toCurrency, amount, idempotencyKey, 'trade');
-  }
-
-  async getTransactions(userId: string, cursor?: string, limit: number = 20) {
-    const safeLimit = Math.min(Math.max(limit, 1), 100);
-    const take = safeLimit + 1;
-
-    const whereCondition: Record<string, any> = { userId };
-    if (cursor) {
-      const cursorDate = new Date(cursor);
-      if (isNaN(cursorDate.getTime())) {
-        throw new BadRequestException('Invalid cursor format. Use ISO 8601 timestamp.');
-      }
-      whereCondition.createdAt = LessThan(cursorDate);
-    }
-
-    const results = await this.transactionLogRepository.find({
-      where: whereCondition,
-      order: { createdAt: 'DESC' },
-      take,
-    });
-
-    const hasMore = results.length > safeLimit;
-    const transactions = hasMore ? results.slice(0, safeLimit) : results;
-    const nextCursor = hasMore
-      ? transactions[transactions.length - 1].createdAt.toISOString()
-      : null;
-
-    return {
-      transactions,
-      nextCursor,
-      count: transactions.length,
-    };
   }
 }

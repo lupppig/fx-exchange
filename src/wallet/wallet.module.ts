@@ -6,14 +6,15 @@ import { WalletService } from './wallet.service.js';
 import { WalletController } from './wallet.controller.js';
 import { Wallet } from './entities/wallet.entity.js';
 import { Balance } from './entities/balance.entity.js';
-import { TransactionLog } from './entities/transaction-log.entity.js';
 import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
 import { FxModule } from '../fx/fx.module.js';
+import { TransactionsModule } from '../transactions/transactions.module.js';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Wallet, Balance, TransactionLog]),
+    TypeOrmModule.forFeature([Wallet, Balance]),
     FxModule,
+    TransactionsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

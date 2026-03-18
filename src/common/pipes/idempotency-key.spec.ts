@@ -22,7 +22,6 @@ describe('IdempotencyKey validation logic', () => {
         `x-idempotency-key must not exceed ${MAX_KEY_LENGTH} characters`,
       );
     }
-
     return trimmed;
   }
 

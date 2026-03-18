@@ -3,16 +3,14 @@ import {
   Get,
   Post,
   Body,
-  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { WalletService } from './wallet.service.js';
 import { FundWalletDto } from './dto/fund-wallet.dto.js';
 import { ConvertDto } from './dto/convert.dto.js';
 import { TradeDto } from './dto/trade.dto.js';
-import { GetTransactionsDto } from './dto/get-transactions.dto.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { IdempotencyKey } from '../common/pipes/parse-idempotency-key.pipe.js';
 
@@ -189,44 +187,4 @@ export class WalletController {
     );
   }
 
-  @Get('transactions')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Get transaction history',
-    description: 'Returns paginated transaction history using cursor-based pagination. Ordered by timestamp descending.',
-  })
-  @ApiQuery({
-    name: 'cursor',
-    required: false,
-    description: 'ISO timestamp cursor from previous page',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    description: 'Number of records per page (default 20, max 100)',
-  })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Transaction history retrieved successfully.',
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', example: true },
-        data: {
-          type: 'object',
-          properties: {
-            transactions: { type: 'array', items: { type: 'object' } },
-            nextCursor: { type: 'string', nullable: true },
-            count: { type: 'number', example: 20 },
-          },
-        },
-      },
-    },
-  })
-  async getTransactions(
-    @CurrentUser('sub') userId: string,
-    @Query() query: GetTransactionsDto,
-  ) {
-    return this.walletService.getTransactions(userId, query.cursor, query.limit);
-  }
 }
