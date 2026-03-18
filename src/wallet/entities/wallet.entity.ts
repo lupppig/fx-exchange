@@ -13,7 +13,7 @@ export class Wallet {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ unique: true })
+  @Column({ unique: true, nullable: false })
   userId!: string;
 
   @OneToMany(() => Balance, (balance) => balance.wallet, { eager: true })

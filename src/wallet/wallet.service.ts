@@ -9,6 +9,7 @@ import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
 import { TransactionStatus } from './enums/transaction-status.enum.js';
 import { FxService } from '../fx/fx.service.js';
 import { getSubunitFactor } from './utils/currency.util.js';
+import { isSupportedCurrency } from '../common/constants/supported-currencies.js';
 
 @Injectable()
 export class WalletService {
@@ -43,6 +44,10 @@ export class WalletService {
 
   async fundWallet(userId: string, currency: string, amount: number, idempotencyKey: string) {
     const normalizedCurrency = currency.toUpperCase();
+
+    if (!isSupportedCurrency(normalizedCurrency)) {
+      throw new BadRequestException(`Unsupported currency: ${normalizedCurrency}`);
+    }
 
     if (!Number.isInteger(amount) || amount <= 0) {
       throw new BadRequestException('Amount must be a positive integer in smallest currency unit');
@@ -160,6 +165,13 @@ export class WalletService {
 
     if (from === to) {
       throw new BadRequestException('Cannot convert to the same currency');
+    }
+
+    if (!isSupportedCurrency(from)) {
+      throw new BadRequestException(`Unsupported currency: ${from}`);
+    }
+    if (!isSupportedCurrency(to)) {
+      throw new BadRequestException(`Unsupported currency: ${to}`);
     }
 
     if (!Number.isInteger(amount) || amount <= 0) {

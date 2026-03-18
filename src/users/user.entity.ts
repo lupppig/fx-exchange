@@ -12,10 +12,10 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ unique: true })
+  @Column({ unique: true, nullable: false })
   email!: string;
 
-  @Column({ select: false })
+  @Column({ select: false, nullable: false })
   passwordHash!: string;
 
   @Column({ default: false })

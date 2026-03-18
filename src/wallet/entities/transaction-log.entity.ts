@@ -15,15 +15,17 @@ import { TransactionStatus } from '../enums/transaction-status.enum.js';
 @Check(`"amount" > 0`)
 @Check(`"balanceBefore" >= 0`)
 @Check(`"balanceAfter" >= 0`)
+@Check(`length("currency") = 3`)
+@Check(`"exchangeRate" IS NULL OR "exchangeRate" > 0`)
 export class TransactionLog {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column()
+  @Column({ nullable: false })
   @Index()
   walletId!: string;
 
-  @Column()
+  @Column({ nullable: false })
   @Index()
   userId!: string;
 
@@ -33,7 +35,7 @@ export class TransactionLog {
   @Column({ type: 'enum', enum: TransactionPurpose })
   purpose!: TransactionPurpose;
 
-  @Column({ length: 3 })
+  @Column({ length: 3, nullable: false })
   currency!: string;
 
   @Column({ type: 'bigint' })
@@ -48,7 +50,7 @@ export class TransactionLog {
   @Column({ type: 'decimal', precision: 18, scale: 8, nullable: true })
   exchangeRate!: number | null;
 
-  @Column({ unique: true })
+  @Column({ unique: true, nullable: false })
   idempotencyKey!: string;
 
   @Column({ type: 'enum', enum: TransactionStatus, default: TransactionStatus.PENDING })

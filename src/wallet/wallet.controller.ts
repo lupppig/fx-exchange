@@ -4,10 +4,8 @@ import {
   Post,
   Body,
   Query,
-  Headers,
   HttpCode,
   HttpStatus,
-  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader, ApiQuery } from '@nestjs/swagger';
 import { WalletService } from './wallet.service.js';
@@ -16,6 +14,7 @@ import { ConvertDto } from './dto/convert.dto.js';
 import { TradeDto } from './dto/trade.dto.js';
 import { GetTransactionsDto } from './dto/get-transactions.dto.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { IdempotencyKey } from '../common/pipes/parse-idempotency-key.pipe.js';
 
 @ApiTags('Wallet')
 @ApiBearerAuth()
@@ -60,13 +59,9 @@ export class WalletController {
   @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid request or funding failure.' })
   async fundWallet(
     @CurrentUser('sub') userId: string,
-    @Headers('x-idempotency-key') idempotencyKey: string,
+    @IdempotencyKey() idempotencyKey: string,
     @Body() dto: FundWalletDto,
   ) {
-    if (!idempotencyKey) {
-      throw new BadRequestException('Idempotency key is required');
-    }
-
     return this.walletService.fundWallet(userId, dto.currency, dto.amount, idempotencyKey);
   }
 
@@ -120,13 +115,9 @@ export class WalletController {
   })
   async convert(
     @CurrentUser('sub') userId: string,
-    @Headers('x-idempotency-key') idempotencyKey: string,
+    @IdempotencyKey() idempotencyKey: string,
     @Body() dto: ConvertDto,
   ) {
-    if (!idempotencyKey) {
-      throw new BadRequestException('Idempotency key is required');
-    }
-
     return this.walletService.convertFunds(
       userId,
       dto.fromCurrency,
@@ -186,13 +177,9 @@ export class WalletController {
   })
   async trade(
     @CurrentUser('sub') userId: string,
-    @Headers('x-idempotency-key') idempotencyKey: string,
+    @IdempotencyKey() idempotencyKey: string,
     @Body() dto: TradeDto,
   ) {
-    if (!idempotencyKey) {
-      throw new BadRequestException('Idempotency key is required');
-    }
-
     return this.walletService.tradeFunds(
       userId,
       dto.fromCurrency,

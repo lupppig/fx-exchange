@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsInt, Min, Max, IsISO8601 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -7,7 +7,7 @@ export class GetTransactionsDto {
     description: 'Cursor for pagination (ISO timestamp of last item from previous page). Leave empty for the first page.',
   })
   @IsOptional()
-  @IsString()
+  @IsISO8601({}, { message: 'Cursor must be a valid ISO 8601 timestamp' })
   cursor?: string;
 
   @ApiPropertyOptional({

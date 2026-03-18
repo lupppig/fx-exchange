@@ -29,6 +29,9 @@ const CACHE_TTL_SECONDS = 90;
 export class FxService {
   private readonly logger = new Logger(FxService.name);
   private readonly apiKey: string;
+  private readonly maxRetries: number;
+  private readonly baseDelayMs: number;
+  private readonly requestTimeoutMs: number;
 
   constructor(
     private readonly httpService: HttpService,
@@ -36,17 +39,59 @@ export class FxService {
     @InjectRedis() private readonly redis: Redis,
   ) {
     this.apiKey = this.configService.get<string>('EXCHANGE_RATE_API_KEY', '');
-    
+    this.maxRetries = this.configService.get<number>('FX_RETRY_MAX', 3);
+    this.baseDelayMs = this.configService.get<number>('FX_RETRY_BASE_DELAY_MS', 300);
+    this.requestTimeoutMs = this.configService.get<number>('FX_REQUEST_TIMEOUT_MS', 5000);
+
+    this.configureRetry();
+  }
+
+  /**
+   * Configures axios-retry with exponential backoff + jitter.
+   *
+   * Delay formula (built into axios-retry.exponentialDelay):
+   *   delay = 2^(attempt-1) * baseDelay * (1 + random jitter)
+   *
+   * Example with baseDelay = 300ms:
+   *   Attempt 1 → ~300ms  (+ jitter)
+   *   Attempt 2 → ~600ms  (+ jitter)
+   *   Attempt 3 → ~1200ms (+ jitter)
+   *
+   * Timeout escalation: each retry doubles the request timeout
+   * to give the provider more breathing room on recovery.
+   */
+  private configureRetry(): void {
+    const baseTimeout = this.requestTimeoutMs;
+
     axiosRetry(this.httpService.axiosRef, {
-      retries: 3,
-      retryDelay: axiosRetry.exponentialDelay,
-      retryCondition: (error) => {
-        return axiosRetry.isNetworkOrIdempotentRequestError(error) || error.response?.status === 429 || error.response?.status! >= 500;
+      retries: this.maxRetries,
+      retryDelay: (retryCount) => {
+        // exponentialDelay already applies jitter internally
+        return axiosRetry.exponentialDelay(retryCount, undefined, this.baseDelayMs);
       },
-      onRetry: (retryCount, error) => {
-        this.logger.warn(`Retrying FX API call... attempt ${retryCount} after error: ${error.message}`);
+      retryCondition: (error) => {
+        return (
+          axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+          error.response?.status === 429 ||
+          (error.response?.status ?? 0) >= 500
+        );
+      },
+      onRetry: (retryCount, error, requestConfig) => {
+        // Escalate timeout: double it for each retry attempt
+        requestConfig.timeout = baseTimeout * Math.pow(2, retryCount);
+
+        this.logger.warn(
+          `FX API retry ${retryCount}/${this.maxRetries} — ` +
+          `error: ${error.message} | ` +
+          `next timeout: ${requestConfig.timeout}ms`,
+        );
       },
     });
+
+    this.logger.log(
+      `FX retry configured: maxRetries=${this.maxRetries}, ` +
+      `baseDelay=${this.baseDelayMs}ms, timeout=${this.requestTimeoutMs}ms`,
+    );
   }
 
   async getRates(): Promise<VersionedRates> {
@@ -62,7 +107,7 @@ export class FxService {
     try {
       const url = `https://v6.exchangerate-api.com/v6/${this.apiKey}/latest/NGN`;
       const { data } = await firstValueFrom(
-        this.httpService.get<FxRateResponse>(url, { timeout: 5000 }),
+        this.httpService.get<FxRateResponse>(url, { timeout: this.requestTimeoutMs }),
       );
 
       if (data.result !== 'success') {
@@ -83,7 +128,9 @@ export class FxService {
       this.logger.log('FX rates fetched and cached successfully');
       return versionedRates;
     } catch (error) {
-      this.logger.warn(`Failed to fetch FX rates from external API: ${(error as Error).message}`);
+      this.logger.warn(
+        `FX rate fetch failed after ${this.maxRetries} retries: ${(error as Error).message}`,
+      );
       return this.getFallbackRates();
     }
   }
@@ -100,3 +147,4 @@ export class FxService {
     );
   }
 }
+

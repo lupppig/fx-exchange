@@ -21,4 +21,7 @@ export const envValidationSchema = Joi.object({
   MAIL_PASS: Joi.string().required(),
   MAIL_FROM: Joi.string().required(),
   EXCHANGE_RATE_API_KEY: Joi.string().required(),
+  FX_RETRY_MAX: Joi.number().integer().min(0).max(10).default(3),
+  FX_RETRY_BASE_DELAY_MS: Joi.number().integer().min(100).max(10000).default(300),
+  FX_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).max(30000).default(5000),
 });

@@ -5,6 +5,13 @@ import { InternalServerErrorException } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
 import { FxService } from './fx.service';
 
+const ENV_DEFAULTS: Record<string, string | number> = {
+  EXCHANGE_RATE_API_KEY: 'test-api-key',
+  FX_RETRY_MAX: 3,
+  FX_RETRY_BASE_DELAY_MS: 300,
+  FX_REQUEST_TIMEOUT_MS: 5000,
+};
+
 describe('FxService', () => {
   let service: FxService;
   let httpService: jest.Mocked<HttpService>;
@@ -21,18 +28,17 @@ describe('FxService', () => {
         FxService,
         {
           provide: HttpService,
-          useValue: { 
+          useValue: {
             get: jest.fn(),
-            axiosRef: { interceptors: { request: { use: jest.fn() }, response: { use: jest.fn() } } }
+            axiosRef: { interceptors: { request: { use: jest.fn() }, response: { use: jest.fn() } } },
           },
         },
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, fallback?: string) => {
-              if (key === 'EXCHANGE_RATE_API_KEY') return 'test-api-key';
-              return fallback;
-            }),
+            get: jest.fn((key: string, fallback?: unknown) =>
+              ENV_DEFAULTS[key] ?? fallback,
+            ),
           },
         },
         {
