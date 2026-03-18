@@ -50,15 +50,54 @@ Use:
 * `READ COMMITTED`
 * `SELECT ... FOR UPDATE`
 
-### Why:
+### 🏗️ Architectural Overview
 
-* Prevents race conditions
-* Avoids performance bottlenecks of SERIALIZABLE
-* Scales better under high concurrency
+The system is built on a **Modular Monolith** architecture, optimized for scalability by offloading background tasks and utilizing distributed coordination primitives.
 
-### Tradeoff:
+### System Diagram
+```mermaid
+graph TD
+    subgraph "Client Layer"
+        C[Client / Mobile / Web]
+    end
 
-* Requires careful locking discipline
+    subgraph "Infrastructure"
+        R[(Redis)]
+        RMQ[[RabbitMQ]]
+        DB[(PostgreSQL)]
+    end
+
+    subgraph "Application Layer (NestJS)"
+        API[API Gateway / Controller]
+        WS[Wallet Service]
+        LS[Lock Service]
+        FX[FX Service]
+        TC[Transactions Consumer]
+    end
+
+    %% Execution Flow
+    C -->|REST Request| API
+    API --> WS
+    
+    %% Locking & Caching
+    WS <-->|Distributed Lock / Cache| R
+    WS -->|Get Rates| FX
+    FX <-->|Cache Rates| R
+
+    %% Write Path
+    WS -->|Atomic Balance Update| DB
+    WS -.->|Emit: record_transaction| RMQ
+    
+    %% Async Path
+    RMQ -.->|Consume| TC
+    TC -->|Buffered Write| DB
+```
+
+### Core Design Patterns
+1. **Distributed Locking (Redlock)**: Ensures atomicity for wallet operations across multiple API instances. Prevents race conditions and double-spending even in a distributed environment.
+2. **Cache-Aside Pattern (Redis)**: Implements high-performance wallet lookups with a 1-hour TTL and immediate invalidation on state changes to reduce database read pressure.
+3. **Asynchronous Buffered Ledger (CQRS-lite)**: Offloads transaction logging to **RabbitMQ**. High-volume writes are processed by background consumers, decoupling core financial mutations from the audit trail response cycle.
+4. **Idempotency Strategy**: Strict idempotency keys are validated synchronously via Redis before any mutation, ensuring exactly-once execution for all financial events.
 
 ---
 
@@ -104,20 +143,6 @@ All financial operations require **idempotency keys**
 ### Why:
 
 * Avoid floating-point precision issues
-
----
-
-# System Flow (FX Conversion)
-
-1. Client sends request with idempotency key
-2. Transaction created (`PENDING`)
-3. FX rate fetched from Redis
-4. Wallet balances locked (`FOR UPDATE`)
-5. Ledger entries created (DEBIT + CREDIT)
-6. Balances updated
-7. Transaction marked `SUCCESS`
-
-If any step fails → rollback
 
 ---
 
