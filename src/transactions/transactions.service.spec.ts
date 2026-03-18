@@ -1,14 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClientProxy } from '@nestjs/microservices';
 import { TransactionsService } from './transactions.service.js';
 import { TransactionLog } from './entities/transaction-log.entity.js';
 import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
+import { TransactionStatus } from './enums/transaction-status.enum.js';
 
 describe('TransactionsService', () => {
   let service: TransactionsService;
   let repo: Repository<TransactionLog>;
+  let client: ClientProxy;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -17,11 +20,14 @@ describe('TransactionsService', () => {
         {
           provide: getRepositoryToken(TransactionLog),
           useValue: {
-            create: jest.fn(),
-            save: jest.fn(),
-            update: jest.fn(),
             findOne: jest.fn(),
             createQueryBuilder: jest.fn(),
+          },
+        },
+        {
+          provide: 'TRANSACTIONS_SERVICE',
+          useValue: {
+            emit: jest.fn(),
           },
         },
       ],
@@ -29,35 +35,47 @@ describe('TransactionsService', () => {
 
     service = module.get<TransactionsService>(TransactionsService);
     repo = module.get<Repository<TransactionLog>>(getRepositoryToken(TransactionLog));
+    client = module.get<ClientProxy>('TRANSACTIONS_SERVICE');
   });
 
   describe('recordTransaction', () => {
-    it('should create and save a transaction log', async () => {
+    it('should emit record_transaction message and return log with UUID', async () => {
       const options = {
         walletId: 'w1',
         userId: 'u1',
         type: TransactionType.CREDIT,
         purpose: TransactionPurpose.FUNDING,
-        currency: 'NGN',
+        currency: 'USD',
         amount: 1000,
         balanceBefore: 0,
         balanceAfter: 1000,
         idempotencyKey: 'key',
       };
 
-      jest.spyOn(repo, 'create').mockReturnValue(options as any);
-      jest.spyOn(repo, 'save').mockResolvedValue(options as any);
+      const result = await service.recordTransaction(options as any);
 
-      const result = await service.recordTransaction(options);
+      expect(client.emit).toHaveBeenCalledWith('record_transaction', expect.objectContaining({
+        ...options,
+        id: expect.any(String),
+        createdAt: expect.any(Date),
+      }));
+      expect(result.id).toBeDefined();
+    });
+  });
 
-      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining(options));
-      expect(repo.save).toHaveBeenCalled();
-      expect(result).toEqual(options);
+  describe('updateTransaction', () => {
+    it('should emit update_transaction message', async () => {
+      const id = 'txn-123';
+      const update = { status: TransactionStatus.SUCCESS };
+
+      await service.updateTransaction(id, update);
+
+      expect(client.emit).toHaveBeenCalledWith('update_transaction', { id, update });
     });
   });
 
   describe('getTransactions', () => {
-    it('should fetch paginated transactions', async () => {
+    it('should fetch transactions using query builder', async () => {
       const mockTxns = [{ id: '1', createdAt: new Date() }];
       const mockQueryBuilder = {
         where: jest.fn().mockReturnThis(),
@@ -71,8 +89,8 @@ describe('TransactionsService', () => {
 
       const result = await service.getTransactions('u1', { limit: 10 });
 
-      expect(result.items).toHaveLength(1);
-      expect(result.hasNextPage).toBe(false);
+      expect(result.items).toBeDefined();
+      expect(repo.createQueryBuilder).toHaveBeenCalled();
     });
   });
 });

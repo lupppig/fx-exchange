@@ -7,6 +7,7 @@ import { Balance } from './entities/balance.entity.js';
 import { TransactionStatus } from '../transactions/enums/transaction-status.enum.js';
 import { FxService } from '../fx/fx.service.js';
 import { TransactionsService } from '../transactions/transactions.service.js';
+import { LockService } from '../common/lock/lock.service.js';
 
 describe('WalletService', () => {
   let service: WalletService;
@@ -64,6 +65,20 @@ describe('WalletService', () => {
             recordTransaction: jest.fn(),
             updateTransaction: jest.fn(),
             findByIdempotencyKey: jest.fn(),
+          },
+        },
+        {
+          provide: LockService,
+          useValue: {
+            acquire: jest.fn().mockImplementation((_resource, _ttl, action) => action()),
+          },
+        },
+        {
+          provide: 'default_IORedisModuleConnectionToken',
+          useValue: {
+            get: jest.fn().mockResolvedValue(null),
+            set: jest.fn().mockResolvedValue('OK'),
+            del: jest.fn().mockResolvedValue(1),
           },
         },
         {
@@ -151,7 +166,7 @@ describe('WalletService', () => {
       const result = await service.fundWallet(mockUserId, 'NGN', 50000, 'idem-key');
 
       expect(transactionsService.recordTransaction).toHaveBeenCalled();
-      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-pending', expect.objectContaining({ status: TransactionStatus.SUCCESS }), expect.anything());
+      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-pending', expect.objectContaining({ status: TransactionStatus.SUCCESS }));
       expect(result.message).toBe('Wallet funded successfully');
     });
 
@@ -199,8 +214,8 @@ describe('WalletService', () => {
 
       expect(result.status).toBe(TransactionStatus.SUCCESS);
       expect(transactionsService.recordTransaction).toHaveBeenCalledTimes(2);
-      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-debit', expect.anything(), expect.anything());
-      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-credit', expect.anything(), expect.anything());
+      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-debit', expect.anything());
+      expect(transactionsService.updateTransaction).toHaveBeenCalledWith('log-credit', expect.anything());
     });
   });
 });
