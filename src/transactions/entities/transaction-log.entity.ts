@@ -5,15 +5,17 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Unique,
   Check,
 } from 'typeorm';
-import { Expose } from 'class-transformer';
+import { Expose, Exclude } from 'class-transformer';
 import { TransactionType } from '../enums/transaction-type.enum.js';
 import { TransactionPurpose } from '../enums/transaction-purpose.enum.js';
 import { TransactionStatus } from '../enums/transaction-status.enum.js';
 import { getSubunitFactor } from '../../wallet/utils/currency.util.js';
 
 @Entity('transaction_logs')
+@Unique(['userId', 'idempotencyKey'])
 @Check(`"amount" > 0`)
 @Check(`"balanceBefore" >= 0`)
 @Check(`"balanceAfter" >= 0`)
@@ -43,19 +45,20 @@ export class TransactionLog {
   @Index()
   currency!: string;
 
-  @Column({ type: 'bigint' })
-  @Expose({ name: 'amountSubunits' })
-  amount!: number;
-
   @Expose()
   get amountDecimal(): number {
     const factor = getSubunitFactor(this.currency);
     return Number(this.amount) / factor;
   }
 
+  @Expose()
+  get amountSubunits(): number {
+    return Number(this.amount);
+  }
+
   @Column({ type: 'bigint' })
-  @Expose({ name: 'balanceBeforeSubunits' })
-  balanceBefore!: number;
+  @Exclude({ toPlainOnly: true })
+  amount!: number;
 
   @Expose()
   get balanceBeforeDecimal(): number {
@@ -63,9 +66,14 @@ export class TransactionLog {
     return Number(this.balanceBefore) / factor;
   }
 
+  @Expose()
+  get balanceBeforeSubunits(): number {
+    return Number(this.balanceBefore);
+  }
+
   @Column({ type: 'bigint' })
-  @Expose({ name: 'balanceAfterSubunits' })
-  balanceAfter!: number;
+  @Exclude({ toPlainOnly: true })
+  balanceBefore!: number;
 
   @Expose()
   get balanceAfterDecimal(): number {
@@ -73,10 +81,19 @@ export class TransactionLog {
     return Number(this.balanceAfter) / factor;
   }
 
+  @Expose()
+  get balanceAfterSubunits(): number {
+    return Number(this.balanceAfter);
+  }
+
+  @Column({ type: 'bigint' })
+  @Exclude({ toPlainOnly: true })
+  balanceAfter!: number;
+
   @Column({ type: 'decimal', precision: 18, scale: 8, nullable: true })
   exchangeRate!: number | null;
 
-  @Column({ unique: true, nullable: false })
+  @Column({ nullable: false })
   idempotencyKey!: string;
 
   @Column({ type: 'enum', enum: TransactionStatus, default: TransactionStatus.PENDING })

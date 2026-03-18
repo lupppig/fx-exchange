@@ -1,3 +1,4 @@
+import { plainToInstance } from 'class-transformer';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectRedis } from '@nestjs-modules/ioredis';
@@ -11,8 +12,10 @@ import { TransactionStatus } from '../transactions/enums/transaction-status.enum
 import { FxService } from '../fx/fx.service.js';
 import { getSubunitFactor } from './utils/currency.util.js';
 import { isSupportedCurrency } from '../common/constants/supported-currencies.js';
+import { TransactionLog } from '../transactions/entities/transaction-log.entity.js';
 import { TransactionsService } from '../transactions/transactions.service.js';
 import { LockService } from '../common/lock/lock.service.js';
+import { WalletResponseDto } from './dto/wallet-response.dto.js';
 
 @Injectable()
 export class WalletService {
@@ -36,13 +39,14 @@ export class WalletService {
     try {
       const cached = await this.redis.get(cacheKey);
       if (cached) {
-        return JSON.parse(cached);
+        return plainToInstance(WalletResponseDto, JSON.parse(cached));
       }
     } catch (error) {
     }
 
     let wallet = await this.walletRepository.findOne({
       where: { userId },
+      relations: ['balances'],
     });
 
     if (!wallet) {
@@ -51,13 +55,13 @@ export class WalletService {
       wallet.balances = [];
     }
 
-    const result = {
+    const result = plainToInstance(WalletResponseDto, {
       walletId: wallet.id,
       userId: wallet.userId,
       balances: wallet.balances,
       createdAt: wallet.createdAt,
       updatedAt: wallet.updatedAt,
-    };
+    });
 
     try {
       await this.redis.set(cacheKey, JSON.stringify(result), 'EX', 3600);
@@ -81,14 +85,13 @@ export class WalletService {
       throw new BadRequestException('Amount must be a positive integer in smallest currency unit');
     }
 
-    const existing = await this.transactionsService.findByIdempotencyKey(idempotencyKey);
+    const existing = await this.transactionsService.findByIdempotencyKey(userId, idempotencyKey);
     if (existing) {
       if (existing.status === TransactionStatus.SUCCESS) {
         return {
           message: 'Wallet funded successfully (idempotent)',
-          currency: existing.currency,
-          amount: Number(existing.amount),
-          newBalance: Number(existing.balanceAfter),
+          status: TransactionStatus.SUCCESS,
+          transaction: plainToInstance(TransactionLog, existing),
         };
       }
       if (existing.status === TransactionStatus.PENDING) {
@@ -145,7 +148,7 @@ export class WalletService {
           balance = await queryRunner.manager.save(balance);
         }
 
-        const balanceAfter = balanceBefore + amount;
+        const balanceAfter = Number(balanceBefore) + Number(amount);
 
         await queryRunner.manager.update(Balance, balance.id, { amount: balanceAfter });
 
@@ -165,9 +168,12 @@ export class WalletService {
         return {
           message: 'Wallet funded successfully',
           status: TransactionStatus.SUCCESS,
-          currency: normalizedCurrency,
-          amount,
-          newBalance: balanceAfter,
+          transaction: plainToInstance(TransactionLog, {
+            ...pendingLog,
+            balanceBefore,
+            balanceAfter,
+            status: TransactionStatus.SUCCESS,
+          }),
         };
       } catch (error) {
         await queryRunner.rollbackTransaction();
@@ -214,10 +220,10 @@ export class WalletService {
     const debitKey = `${idempotencyKey}:debit`;
     const creditKey = `${idempotencyKey}:credit`;
 
-    const existingDebit = await this.transactionsService.findByIdempotencyKey(debitKey);
+    const existingDebit = await this.transactionsService.findByIdempotencyKey(userId, debitKey);
     if (existingDebit) {
       if (existingDebit.status === TransactionStatus.SUCCESS) {
-        const existingCredit = await this.transactionsService.findByIdempotencyKey(creditKey);
+        const existingCredit = await this.transactionsService.findByIdempotencyKey(userId, creditKey);
         return {
           message: 'Conversion successful (idempotent)',
           status: existingDebit.status,
@@ -247,7 +253,6 @@ export class WalletService {
       throw new BadRequestException(`Amount too small to ${context}.`);
     }
 
-    // 2. Early Claim (PENDING status)
     return this.lockService.acquire(`wallet:${userId}`, 10000, async () => {
       let wallet = await this.walletRepository.findOne({ where: { userId } });
       if (!wallet) {
@@ -283,7 +288,6 @@ export class WalletService {
         status: TransactionStatus.PENDING,
       });
 
-      // 3. Execution logic
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
@@ -321,9 +325,9 @@ export class WalletService {
         }
 
         const fromBefore = Number(fromBalance.amount);
-        const fromAfter = fromBefore - amount;
+        const fromAfter = Number(fromBefore) - Number(amount);
         const toBefore = Number(toBalance.amount);
-        const toAfter = toBefore + convertedAmount;
+        const toAfter = Number(toBefore) + Number(convertedAmount);
 
         await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
         await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
@@ -347,8 +351,8 @@ export class WalletService {
           status: TransactionStatus.SUCCESS,
           rateVersion: rates.version,
           exchangeRate,
-          debit: { ...pendingDebit, balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
-          credit: { ...pendingCredit, balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
+          debit: plainToInstance(TransactionLog, { ...pendingDebit, balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS }),
+          credit: plainToInstance(TransactionLog, { ...pendingCredit, balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS }),
         };
       } catch (error) {
         await queryRunner.rollbackTransaction();

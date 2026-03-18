@@ -9,7 +9,7 @@ import {
   JoinColumn,
   Check,
 } from 'typeorm';
-import { Expose } from 'class-transformer';
+import { Expose, Exclude } from 'class-transformer';
 import { Wallet } from './wallet.entity.js';
 import { getSubunitFactor } from '../utils/currency.util.js';
 
@@ -26,20 +26,26 @@ export class Balance {
 
   @ManyToOne(() => Wallet, (wallet) => wallet.balances)
   @JoinColumn({ name: 'walletId' })
+  @Exclude()
   wallet!: Wallet;
 
   @Column({ length: 3, nullable: false })
   currency!: string;
 
-  @Column({ type: 'bigint', default: 0 })
-  @Expose({ name: 'amountSubunits' })
-  amount!: number;
-
   @Expose()
-  get amountDecimal(): number {
+  get balanceDecimal(): number {
     const factor = getSubunitFactor(this.currency);
     return Number(this.amount) / factor;
   }
+
+  @Expose()
+  get balanceSubunits(): number {
+    return Number(this.amount);
+  }
+
+  @Column({ type: 'bigint', default: 0 })
+  @Exclude({ toPlainOnly: true })
+  amount!: number;
 
   @CreateDateColumn()
   createdAt!: Date;

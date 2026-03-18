@@ -1,3 +1,4 @@
+import { plainToInstance } from 'class-transformer';
 import { Injectable, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ClientProxy } from '@nestjs/microservices';
@@ -38,20 +39,20 @@ export class TransactionsService {
     options: RecordTransactionOptions,
   ): Promise<TransactionLog> {
     const id = uuidv4();
-    const log = {
+    const logData = {
       ...options,
       id,
       status: options.status ?? TransactionStatus.SUCCESS,
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as TransactionLog;
+    };
 
-    this.client.emit('record_transaction', log);
+    this.client.emit('record_transaction', logData);
 
-    return log;
+    return plainToInstance(TransactionLog, logData);
   }
 
-  /**
+  /*
    * Updates the status or details of an existing transaction asynchronously.
    */
   async updateTransaction(
@@ -64,8 +65,10 @@ export class TransactionsService {
   /**
    * Finds a transaction by its idempotency key.
    */
-  async findByIdempotencyKey(key: string): Promise<TransactionLog | null> {
-    return this.repo.findOne({ where: { idempotencyKey: key } });
+  async findByIdempotencyKey(userId: string, key: string): Promise<TransactionLog | null> {
+    return this.repo.findOne({
+      where: { userId, idempotencyKey: key },
+    });
   }
 
   /**
