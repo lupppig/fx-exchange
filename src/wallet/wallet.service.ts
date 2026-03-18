@@ -10,6 +10,7 @@ import { FxService } from '../fx/fx.service.js';
 import { getSubunitFactor } from './utils/currency.util.js';
 import { isSupportedCurrency } from '../common/constants/supported-currencies.js';
 import { TransactionsService } from '../transactions/transactions.service.js';
+import { LockService } from '../common/lock/lock.service.js';
 
 @Injectable()
 export class WalletService {
@@ -17,6 +18,7 @@ export class WalletService {
     @InjectRepository(Wallet)
     private readonly walletRepository: Repository<Wallet>,
     private readonly transactionsService: TransactionsService,
+    private readonly lockService: LockService,
     private readonly dataSource: DataSource,
     private readonly fxService: FxService,
   ) {}
@@ -58,7 +60,6 @@ export class WalletService {
       throw new BadRequestException('Amount must be a positive integer in smallest currency unit');
     }
 
-    // 1. Idempotency check
     const existing = await this.transactionsService.findByIdempotencyKey(idempotencyKey);
     if (existing) {
       if (existing.status === TransactionStatus.SUCCESS) {
@@ -77,86 +78,88 @@ export class WalletService {
       }
     }
 
-    // 2. Early Claim (PENDING status)
-    let wallet = await this.walletRepository.findOne({ where: { userId } });
-    if (!wallet) {
-      wallet = this.walletRepository.create({ userId });
-      wallet = await this.walletRepository.save(wallet);
-    }
-
-    const pendingLog = await this.transactionsService.recordTransaction({
-      walletId: wallet.id,
-      userId,
-      type: TransactionType.CREDIT,
-      purpose: TransactionPurpose.FUNDING,
-      currency: normalizedCurrency,
-      amount,
-      balanceBefore: 0,
-      balanceAfter: 0,
-      idempotencyKey,
-      status: TransactionStatus.PENDING,
-    });
-
-    // 3. Fund logic
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      let balance = await queryRunner.manager
-        .createQueryBuilder(Balance, 'balance')
-        .setLock('pessimistic_write')
-        .where('balance.walletId = :walletId AND balance.currency = :currency', {
-          walletId: wallet.id,
-          currency: normalizedCurrency,
-        })
-        .getOne();
-
-      const balanceBefore = balance ? Number(balance.amount) : 0;
-
-      if (!balance) {
-        balance = queryRunner.manager.create(Balance, {
-          walletId: wallet.id,
-          currency: normalizedCurrency,
-          amount: 0,
-        });
-        balance = await queryRunner.manager.save(balance);
+    //  Early Claim (PENDING status)
+    return this.lockService.acquire(`wallet:${userId}`, 10000, async () => {
+      let wallet = await this.walletRepository.findOne({ where: { userId } });
+      if (!wallet) {
+        wallet = this.walletRepository.create({ userId });
+        wallet = await this.walletRepository.save(wallet);
       }
 
-      const balanceAfter = balanceBefore + amount;
-
-      await queryRunner.manager.update(Balance, balance.id, { amount: balanceAfter });
-
-      // 4. Update log to SUCCESS
-      await this.transactionsService.updateTransaction(
-        pendingLog.id,
-        {
-          balanceBefore,
-          balanceAfter,
-          status: TransactionStatus.SUCCESS,
-        },
-        queryRunner.manager,
-      );
-
-      await queryRunner.commitTransaction();
-
-      return {
-        message: 'Wallet funded successfully',
-        status: TransactionStatus.SUCCESS,
+      const pendingLog = await this.transactionsService.recordTransaction({
+        walletId: wallet.id,
+        userId,
+        type: TransactionType.CREDIT,
+        purpose: TransactionPurpose.FUNDING,
         currency: normalizedCurrency,
         amount,
-        newBalance: balanceAfter,
-      };
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      await this.transactionsService.updateTransaction(pendingLog.id, {
-        status: TransactionStatus.FAILED,
+        balanceBefore: 0,
+        balanceAfter: 0,
+        idempotencyKey,
+        status: TransactionStatus.PENDING,
       });
-      if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException('Failed to fund wallet');
-    } finally {
-      await queryRunner.release();
-    }
+
+      //Fund logic
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        let balance = await queryRunner.manager
+          .createQueryBuilder(Balance, 'balance')
+          .setLock('pessimistic_write')
+          .where('balance.walletId = :walletId AND balance.currency = :currency', {
+            walletId: wallet.id,
+            currency: normalizedCurrency,
+          })
+          .getOne();
+
+        const balanceBefore = balance ? Number(balance.amount) : 0;
+
+        if (!balance) {
+          balance = queryRunner.manager.create(Balance, {
+            walletId: wallet.id,
+            currency: normalizedCurrency,
+            amount: 0,
+          });
+          balance = await queryRunner.manager.save(balance);
+        }
+
+        const balanceAfter = balanceBefore + amount;
+
+        await queryRunner.manager.update(Balance, balance.id, { amount: balanceAfter });
+
+        // 4. Update log to SUCCESS
+        await this.transactionsService.updateTransaction(
+          pendingLog.id,
+          {
+            balanceBefore,
+            balanceAfter,
+            status: TransactionStatus.SUCCESS,
+          },
+          queryRunner.manager,
+        );
+
+        await queryRunner.commitTransaction();
+
+        return {
+          message: 'Wallet funded successfully',
+          status: TransactionStatus.SUCCESS,
+          currency: normalizedCurrency,
+          amount,
+          newBalance: balanceAfter,
+        };
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        await this.transactionsService.updateTransaction(pendingLog.id, {
+          status: TransactionStatus.FAILED,
+        });
+        if (error instanceof BadRequestException) throw error;
+        throw new BadRequestException('Failed to fund wallet');
+      } finally {
+        await queryRunner.release();
+      }
+    });
   }
 
   /**
@@ -226,117 +229,119 @@ export class WalletService {
     }
 
     // 2. Early Claim (PENDING status)
-    let wallet = await this.walletRepository.findOne({ where: { userId } });
-    if (!wallet) {
-      wallet = this.walletRepository.create({ userId });
-      wallet = await this.walletRepository.save(wallet);
-    }
-
-    const pendingDebit = await this.transactionsService.recordTransaction({
-      walletId: wallet.id,
-      userId,
-      type: TransactionType.DEBIT,
-      purpose: context === 'trade' ? TransactionPurpose.TRADE : TransactionPurpose.EXCHANGE,
-      currency: fromCurrency,
-      amount,
-      balanceBefore: 0,
-      balanceAfter: 0,
-      exchangeRate,
-      idempotencyKey: debitKey,
-      status: TransactionStatus.PENDING,
-    });
-
-    const pendingCredit = await this.transactionsService.recordTransaction({
-      walletId: wallet.id,
-      userId,
-      type: TransactionType.CREDIT,
-      purpose: context === 'trade' ? TransactionPurpose.TRADE : TransactionPurpose.EXCHANGE,
-      currency: toCurrency,
-      amount: convertedAmount,
-      balanceBefore: 0,
-      balanceAfter: 0,
-      exchangeRate,
-      idempotencyKey: creditKey,
-      status: TransactionStatus.PENDING,
-    });
-
-    // 3. Execution logic
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      const fromBalance = await queryRunner.manager
-        .createQueryBuilder(Balance, 'balance')
-        .setLock('pessimistic_write')
-        .where('balance.walletId = :walletId AND balance.currency = :currency', {
-          walletId: wallet.id,
-          currency: fromCurrency,
-        })
-        .getOne();
-
-      if (!fromBalance || Number(fromBalance.amount) < amount) {
-        throw new BadRequestException(`Insufficient ${fromCurrency} balance`);
+    return this.lockService.acquire(`wallet:${userId}`, 10000, async () => {
+      let wallet = await this.walletRepository.findOne({ where: { userId } });
+      if (!wallet) {
+        wallet = this.walletRepository.create({ userId });
+        wallet = await this.walletRepository.save(wallet);
       }
 
-      let toBalance = await queryRunner.manager
-        .createQueryBuilder(Balance, 'balance')
-        .setLock('pessimistic_write')
-        .where('balance.walletId = :walletId AND balance.currency = :currency', {
-          walletId: wallet.id,
-          currency: toCurrency,
-        })
-        .getOne();
-
-      if (!toBalance) {
-        toBalance = queryRunner.manager.create(Balance, {
-          walletId: wallet.id,
-          currency: toCurrency,
-          amount: 0,
-        });
-        toBalance = await queryRunner.manager.save(toBalance);
-      }
-
-      const fromBefore = Number(fromBalance.amount);
-      const fromAfter = fromBefore - amount;
-      const toBefore = Number(toBalance.amount);
-      const toAfter = toBefore + convertedAmount;
-
-      await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
-      await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
-
-      // 4. Update logs to SUCCESS
-      await this.transactionsService.updateTransaction(
-        pendingDebit.id,
-        { balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
-        queryRunner.manager,
-      );
-
-      await this.transactionsService.updateTransaction(
-        pendingCredit.id,
-        { balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
-        queryRunner.manager,
-      );
-
-      await queryRunner.commitTransaction();
-
-      return {
-        message: 'Conversion successful',
-        status: TransactionStatus.SUCCESS,
-        rateVersion: rates.version,
+      const pendingDebit = await this.transactionsService.recordTransaction({
+        walletId: wallet.id,
+        userId,
+        type: TransactionType.DEBIT,
+        purpose: context === 'trade' ? TransactionPurpose.TRADE : TransactionPurpose.EXCHANGE,
+        currency: fromCurrency,
+        amount,
+        balanceBefore: 0,
+        balanceAfter: 0,
         exchangeRate,
-        debit: { ...pendingDebit, balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
-        credit: { ...pendingCredit, balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
-      };
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      await this.transactionsService.updateTransaction(pendingDebit.id, { status: TransactionStatus.FAILED });
-      await this.transactionsService.updateTransaction(pendingCredit.id, { status: TransactionStatus.FAILED });
-      if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException('Failed to convert funds');
-    } finally {
-      await queryRunner.release();
-    }
+        idempotencyKey: debitKey,
+        status: TransactionStatus.PENDING,
+      });
+
+      const pendingCredit = await this.transactionsService.recordTransaction({
+        walletId: wallet.id,
+        userId,
+        type: TransactionType.CREDIT,
+        purpose: context === 'trade' ? TransactionPurpose.TRADE : TransactionPurpose.EXCHANGE,
+        currency: toCurrency,
+        amount: convertedAmount,
+        balanceBefore: 0,
+        balanceAfter: 0,
+        exchangeRate,
+        idempotencyKey: creditKey,
+        status: TransactionStatus.PENDING,
+      });
+
+      // 3. Execution logic
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        const fromBalance = await queryRunner.manager
+          .createQueryBuilder(Balance, 'balance')
+          .setLock('pessimistic_write')
+          .where('balance.walletId = :walletId AND balance.currency = :currency', {
+            walletId: wallet.id,
+            currency: fromCurrency,
+          })
+          .getOne();
+
+        if (!fromBalance || Number(fromBalance.amount) < amount) {
+          throw new BadRequestException(`Insufficient ${fromCurrency} balance`);
+        }
+
+        let toBalance = await queryRunner.manager
+          .createQueryBuilder(Balance, 'balance')
+          .setLock('pessimistic_write')
+          .where('balance.walletId = :walletId AND balance.currency = :currency', {
+            walletId: wallet.id,
+            currency: toCurrency,
+          })
+          .getOne();
+
+        if (!toBalance) {
+          toBalance = queryRunner.manager.create(Balance, {
+            walletId: wallet.id,
+            currency: toCurrency,
+            amount: 0,
+          });
+          toBalance = await queryRunner.manager.save(toBalance);
+        }
+
+        const fromBefore = Number(fromBalance.amount);
+        const fromAfter = fromBefore - amount;
+        const toBefore = Number(toBalance.amount);
+        const toAfter = toBefore + convertedAmount;
+
+        await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
+        await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
+
+        // 4. Update logs to SUCCESS
+        await this.transactionsService.updateTransaction(
+          pendingDebit.id,
+          { balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
+          queryRunner.manager,
+        );
+
+        await this.transactionsService.updateTransaction(
+          pendingCredit.id,
+          { balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
+          queryRunner.manager,
+        );
+
+        await queryRunner.commitTransaction();
+
+        return {
+          message: 'Conversion successful',
+          status: TransactionStatus.SUCCESS,
+          rateVersion: rates.version,
+          exchangeRate,
+          debit: { ...pendingDebit, balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
+          credit: { ...pendingCredit, balanceBefore: toBefore, balanceAfter: toAfter, status: TransactionStatus.SUCCESS },
+        };
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        await this.transactionsService.updateTransaction(pendingDebit.id, { status: TransactionStatus.FAILED });
+        await this.transactionsService.updateTransaction(pendingCredit.id, { status: TransactionStatus.FAILED });
+        if (error instanceof BadRequestException) throw error;
+        throw new BadRequestException('Failed to convert funds');
+      } finally {
+        await queryRunner.release();
+      }
+    });
   }
 
   /**
