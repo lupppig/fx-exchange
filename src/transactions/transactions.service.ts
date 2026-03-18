@@ -46,7 +46,6 @@ export class TransactionsService {
       updatedAt: new Date(),
     } as TransactionLog;
 
-    // Emit to RabbitMQ for buffered write
     this.client.emit('record_transaction', log);
 
     return log;

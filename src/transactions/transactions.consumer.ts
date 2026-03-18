@@ -24,7 +24,6 @@ export class TransactionsConsumer {
       channel.ack(originalMsg);
     } catch (error) {
       this.logger.error(`Failed to persist transaction ${data.id}:`, error);
-      // Depending on error, we might nack or retry
       channel.nack(originalMsg, false, true); // requeue
     }
   }

@@ -33,17 +33,14 @@ export class WalletService {
   async getWallet(userId: string) {
     const cacheKey = `wallet:balances:${userId}`;
     
-    // 1. Try Cache
     try {
       const cached = await this.redis.get(cacheKey);
       if (cached) {
         return JSON.parse(cached);
       }
     } catch (error) {
-      // Fail silent and fallback to DB
     }
 
-    // 2. Fallback to DB
     let wallet = await this.walletRepository.findOne({
       where: { userId },
     });
@@ -62,11 +59,9 @@ export class WalletService {
       updatedAt: wallet.updatedAt,
     };
 
-    // 3. Populate Cache (1 hour TTL)
     try {
       await this.redis.set(cacheKey, JSON.stringify(result), 'EX', 3600);
     } catch (error) {
-      // Fail silent
     }
 
     return result;
@@ -125,7 +120,6 @@ export class WalletService {
         status: TransactionStatus.PENDING,
       });
 
-      //Fund logic
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
@@ -155,7 +149,6 @@ export class WalletService {
 
         await queryRunner.manager.update(Balance, balance.id, { amount: balanceAfter });
 
-        // 4. Update log to SUCCESS
         await this.transactionsService.updateTransaction(
           pendingLog.id,
           {
@@ -167,7 +160,6 @@ export class WalletService {
 
         await queryRunner.commitTransaction();
 
-        // Invalidate cache
         await this.redis.del(`wallet:balances:${userId}`).catch(() => {});
 
         return {
@@ -222,7 +214,6 @@ export class WalletService {
     const debitKey = `${idempotencyKey}:debit`;
     const creditKey = `${idempotencyKey}:credit`;
 
-    // 1. Idempotency check
     const existingDebit = await this.transactionsService.findByIdempotencyKey(debitKey);
     if (existingDebit) {
       if (existingDebit.status === TransactionStatus.SUCCESS) {
@@ -337,7 +328,6 @@ export class WalletService {
         await queryRunner.manager.update(Balance, fromBalance.id, { amount: fromAfter });
         await queryRunner.manager.update(Balance, toBalance.id, { amount: toAfter });
 
-        // 4. Update logs to SUCCESS
         await this.transactionsService.updateTransaction(
           pendingDebit.id,
           { balanceBefore: fromBefore, balanceAfter: fromAfter, status: TransactionStatus.SUCCESS },
@@ -350,7 +340,6 @@ export class WalletService {
 
         await queryRunner.commitTransaction();
 
-        // Invalidate cache
         await this.redis.del(`wallet:balances:${userId}`).catch(() => {});
 
         return {
