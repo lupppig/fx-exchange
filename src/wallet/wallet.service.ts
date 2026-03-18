@@ -1,5 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRedis } from '@nestjs-modules/ioredis';
+import Redis from 'ioredis';
 import { DataSource, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity.js';
 import { Balance } from './entities/balance.entity.js';
@@ -21,12 +23,27 @@ export class WalletService {
     private readonly lockService: LockService,
     private readonly dataSource: DataSource,
     private readonly fxService: FxService,
+    @InjectRedis() private readonly redis: Redis,
   ) {}
 
   /**
    * Fetches or creates a wallet for a user.
+   * Uses cache-aside pattern for balances.
    */
   async getWallet(userId: string) {
+    const cacheKey = `wallet:balances:${userId}`;
+    
+    // 1. Try Cache
+    try {
+      const cached = await this.redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (error) {
+      // Fail silent and fallback to DB
+    }
+
+    // 2. Fallback to DB
     let wallet = await this.walletRepository.findOne({
       where: { userId },
     });
@@ -37,13 +54,22 @@ export class WalletService {
       wallet.balances = [];
     }
 
-    return {
+    const result = {
       walletId: wallet.id,
       userId: wallet.userId,
       balances: wallet.balances,
       createdAt: wallet.createdAt,
       updatedAt: wallet.updatedAt,
     };
+
+    // 3. Populate Cache (1 hour TTL)
+    try {
+      await this.redis.set(cacheKey, JSON.stringify(result), 'EX', 3600);
+    } catch (error) {
+      // Fail silent
+    }
+
+    return result;
   }
 
   /**
@@ -141,6 +167,9 @@ export class WalletService {
         );
 
         await queryRunner.commitTransaction();
+
+        // Invalidate cache
+        await this.redis.del(`wallet:balances:${userId}`).catch(() => {});
 
         return {
           message: 'Wallet funded successfully',
@@ -323,6 +352,9 @@ export class WalletService {
         );
 
         await queryRunner.commitTransaction();
+
+        // Invalidate cache
+        await this.redis.del(`wallet:balances:${userId}`).catch(() => {});
 
         return {
           message: 'Conversion successful',
