@@ -1,60 +1,34 @@
-# FX Exchange System — Case Study
+# FX Exchange & Wallet System
 
 ## Overview
 
-This project is a **production-grade FX exchange and wallet system** designed to handle **high-concurrency financial transactions** with strict guarantees around **consistency, correctness, and auditability**.
+This project is a **production-grade foreign exchange and wallet system** built to handle **high-concurrency financial transactions** without compromising correctness.
 
-Unlike basic CRUD systems, this platform was built with the mindset that:
+At its core, the system is designed around one simple rule:
 
-> **“Money must never be created, lost, or duplicated — even under failure.”**
+> **Money should never be created, lost, or duplicated — no matter what goes wrong.**
 
----
-
-# Problem Statement
-
-Design a system that allows users to:
-
-* Hold balances in multiple currencies
-* Convert between currencies using real-time FX rates
-* Perform operations safely under high concurrency
-* Scale to **millions of users**
+Everything in this system — from how transactions are processed to how data is stored — is built to uphold that guarantee, even under retries, failures, or heavy load.
 
 ---
 
-# Key Design Decisions
+## The Problem
 
-## 1. Modular Monolith (Instead of Microservices)
+The goal was to design a system where users can:
 
-### Why:
+* Hold balances across multiple currencies
+* Convert between currencies using live FX rates
+* Safely perform transactions under heavy concurrency
+* Scale to millions of users without breaking financial integrity
 
-* Faster development and iteration
-* Easier debugging
-* Avoid premature distributed complexity
-
-### Tradeoff:
-
-* Less independent scaling per service
-
-### Future Path:
-
-* FX service and Ledger system can be extracted into microservices when needed
+This isn’t just about moving numbers around — it’s about doing so **safely, deterministically, and auditably**.
 
 ---
 
-## 2. READ COMMITTED + Row-Level Locking (Not SERIALIZABLE)
+## Architecture Overview
 
-### Decision:
+The system follows a **modular monolith** approach, with clear internal boundaries and a focus on simplicity early on.
 
-Use:
-
-* `READ COMMITTED`
-* `SELECT ... FOR UPDATE`
-
-### 🏗️ Architectural Overview
-
-The system is built on a **Modular Monolith** architecture, optimized for scalability by offloading background tasks and utilizing distributed coordination primitives.
-
-### System Diagram
 ```mermaid
 graph TD
     subgraph "Client Layer"
@@ -75,239 +49,278 @@ graph TD
         TC[Transactions Consumer]
     end
 
-    %% Execution Flow
     C -->|REST Request| API
     API --> WS
     
-    %% Locking & Caching
-    WS <-->|Distributed Lock / Cache| R
+    WS <-->|Lock / Cache| R
     WS -->|Get Rates| FX
-    FX <-->|Cache Rates| R
+    FX <-->|Cache| R
 
-    %% Write Path
-    WS -->|Atomic Balance Update| DB
-    WS -.->|Emit: record_transaction| RMQ
+    WS -->|Update Balance| DB
+    WS -.->|Emit Event| RMQ
     
-    %% Async Path
     RMQ -.->|Consume| TC
-    TC -->|Buffered Write| DB
+    TC -->|Write Ledger| DB
 ```
 
-### Core Design Patterns
-1. **Distributed Locking (Redlock)**: Ensures atomicity for wallet operations across multiple API instances. Prevents race conditions and double-spending even in a distributed environment.
-2. **Cache-Aside Pattern (Redis)**: Implements high-performance wallet lookups with a 1-hour TTL and immediate invalidation on state changes to reduce database read pressure.
-3. **Asynchronous Buffered Ledger (CQRS-lite)**: Offloads transaction logging to **RabbitMQ**. High-volume writes are processed by background consumers, decoupling core financial mutations from the audit trail response cycle.
-4. **Idempotency Strategy**: Strict idempotency keys are validated synchronously via Redis before any mutation, ensuring exactly-once execution for all financial events.
+---
+
+## Core Design Decisions
+
+### 1. Modular Monolith (For Now)
+
+Instead of jumping straight into microservices, the system is built as a modular monolith.
+
+This makes it easier to:
+
+* Move fast
+* Debug issues without distributed complexity
+* Maintain consistency across modules
+
+That said, the boundaries are intentional. Components like the **ledger** and **FX service** can be extracted later when scaling demands it.
 
 ---
 
-## 3. Double-Entry Ledger (Instead of Direct Balance Trust)
+### 2. Transaction Isolation: READ COMMITTED + Row Locks
 
-### Decision:
+Rather than using `SERIALIZABLE` (which can severely impact performance), the system uses:
 
-Balances are derived from an **immutable ledger**
+* `READ COMMITTED`
+* `SELECT ... FOR UPDATE`
 
-### Why:
+This combination gives:
 
-* Prevents hidden inconsistencies
-* Enables full auditability
-* Matches real financial systems
+* Strong enough consistency for financial operations
+* Better throughput under high concurrency
 
-### Tradeoff:
-
-* More complex data model
+Row-level locking ensures that **only one transaction can modify a wallet at a time**, preventing race conditions without locking the entire table.
 
 ---
 
-## 4. Idempotent Transaction Design
+### 3. Distributed Locking (Redis)
 
-### Decision:
+To coordinate across multiple API instances, Redis is used for **distributed locks (Redlock)**.
 
-All financial operations require **idempotency keys**
+This prevents scenarios like:
 
-### Why:
+* Two servers processing the same wallet simultaneously
+* Double spending in a horizontally scaled environment
 
-* Prevent duplicate charges
-* Enable safe retries
-* Ensure exactly-once execution
-
----
-
-## 5. Store Money as Integers (Subunits)
-
-### Decision:
-
-* NGN → kobo
-* USD → cents
-
-### Why:
-
-* Avoid floating-point precision issues
+The lock is short-lived and scoped per wallet operation.
 
 ---
 
-# Challenges & How They Were Solved
+### 4. Double-Entry Ledger
 
-## 1. Race Conditions
+Balances are **not blindly trusted**.
 
-### Problem:
+Instead, every financial operation is recorded in an **immutable double-entry ledger**, where:
 
-Concurrent requests could modify the same wallet
+* Every debit has a corresponding credit
+* The system can always reconstruct balances
 
-### Solution:
+This gives:
+
+* Full auditability
+* Easier debugging of inconsistencies
+* Alignment with real financial systems
+
+---
+
+### 5. Idempotency as a First-Class Concept
+
+Every financial request must include an **idempotency key**.
+
+Before processing:
+
+* The system checks if the key already exists
+* If it does, the previous result is returned
+
+This guarantees:
+
+* Safe retries
+* No duplicate transactions
+* Exactly-once execution semantics
+
+---
+
+### 6. Integer-Based Money Representation
+
+All money is stored in **subunits**:
+
+* NGN -> kobo
+* USD -> cents
+
+This avoids floating-point precision issues that can silently corrupt financial systems.
+
+---
+
+## Currency Handling
+
+Financial correctness is the highest priority in this system. To achieve this, we avoid floating-point math entirely for balance storage and arithmetic.
+
+*   **Subunit Denominations**: All balances are stored as **integers** in their smallest possible unit (e.g., 100 NGN is stored as `10000` kobo).
+*   **Precision Loss Protection**: During currency conversion, the system calculates the exchange but rounds to the nearest whole subunit. If a trade amount is so small that it results in less than 1 whole subunit (e.g., converting 1 kobo to USD), the transaction is **rejected** to prevent "value leakage" and keep the ledger perfectly balanced.
+*   **Database Schema**: The `amount` columns in PostgreSQL utilize the `BIGINT` type, ensuring we can handle extremely large balances without the rounding errors associated with `DECIMAL` or `FLOAT` in high-volume environments.
+
+---
+
+## How Transactions Flow
+
+1. Client sends request (with idempotency key)
+2. System acquires a **distributed lock**
+3. Database row is locked using `FOR UPDATE`
+4. Balance is validated and updated atomically
+5. Event is emitted to **RabbitMQ**
+6. Background worker records the transaction in the ledger
+
+This split ensures:
+
+* Fast API responses
+* Reliable audit logging
+* Reduced database contention
+
+---
+
+## Problems Faced & Solutions
+
+### Race Conditions
+
+**Problem:** Multiple requests updating the same wallet
+
+**Solution:**
 
 * Row-level locking (`FOR UPDATE`)
-* Short-lived transactions
+* Redis distributed locks
 
 ---
 
-## 2. Duplicate Transactions
+### Duplicate Transactions
 
-### Problem:
+**Problem:** Retries causing double charges
 
-Network retries could double-credit users
-
-### Solution:
+**Solution:**
 
 * Idempotency keys
-* Transaction state machine
+* Transaction state tracking
 
 ---
 
-## 3. FX Provider Downtime
+### FX Provider Downtime
 
-### Problem:
+**Problem:** External rate provider fails
 
-External dependency failure
-
-### Solution:
+**Solution:**
 
 * Redis caching
-* fallback to last known rate
+* Fallback to last known rate
 
 ---
 
-## 4. Precision Loss in Currency Conversion
+### Precision Loss
 
-### Problem:
+**Problem:** Currency conversion producing fractional subunits
 
-Floating-point rounding errors can lead to "missing" money in financial systems.
+**Solution:**
 
-### Solution:
+* Reject transactions that result in less than 1 subunit
 
-*   **Integer-based storage**: All balances are in the smallest unit (kobo/cents).
-*   **Reject subunit-loss transactions**: If a conversion results in less than 1 whole unit (after rounding), the transaction is blocked.
-*   **Example**: 500 NGN kobo (5 Naira) converts to roughly 0.3 USD cents. Since we cannot credit 0.3 cents to a wallet, the system rounds to 0 and blocks the trade to prevent value loss.
+Example:
+
+* 5 NGN → 0.3 cents → **rejected**
+
+This avoids silently losing value.
 
 ---
 
-# Scaling Strategy
+## Scaling Strategy
 
-## Horizontal Scaling
+### Horizontal Scaling
 
 * Stateless API instances
 * Load-balanced traffic
 
 ---
 
-## Database Scaling
+### Database Scaling
 
 * Read replicas
-* Indexed queries
-* future partitioning
+* Proper indexing
+* Future partitioning (for ledger tables)
 
 ---
 
-## Redis Scaling
+### Redis Scaling
 
-* Redis cluster
-* separation of cache & queues
-
----
-
-## Worker Scaling
-
-* BullMQ workers scaled independently
-* handles async load (emails, future jobs)
+* Redis Cluster
+* Separation of concerns (locks vs cache)
 
 ---
 
-# Reliability Guarantees
+### Worker Scaling
 
-* Atomic transactions
-* Idempotent operations
-* Immutable ledger
-* Retry-safe system
+* Background workers scale independently
+* Handles async workloads like ledger writes
 
 ---
 
-# Testing Strategy
+## Reliability Guarantees
 
-* Unit tests for logic
-* Integration tests for DB flows
-* E2E tests for API behavior
+This system ensures:
 
----
-
-# What Makes This System Strong
-
-This is not just an API — it is a **financially safe system**.
-
-It guarantees:
-
+* Atomic balance updates
 * No double spending
-* No lost funds
-* Consistent balances under concurrency
-* Full audit trail
+* Safe retries (idempotency)
+* Fully auditable transactions
+* Consistent state under concurrency
 
 ---
 
-# Future Improvements
+## Testing Approach
 
-If scaled further, the next steps would be:
-
-### 1. Extract Ledger Service
-
-* isolate financial core
-
-### 2. Dedicated FX Rate Service
-
-* background syncing
-* provider failover
-
-### 3. Event-Driven Architecture
-
-* Kafka / streaming for transactions
-
-### 4. Observability
-
-* metrics (Prometheus)
-* tracing (OpenTelemetry)
+* **Unit tests** for core logic
+* **Integration tests** for database transactions
+* **E2E tests** for full request flows
 
 ---
 
-# Key Takeaways
+## Future Improvements
 
-This project demonstrates:
+As the system grows:
 
-* strong understanding of **financial system design**
-* ability to handle **concurrency and data integrity**
-* practical knowledge of **scaling backend systems**
+### Extract Ledger Service
+
+Make the ledger its own service for better isolation
+
+### Dedicated FX Service
+
+* Background syncing
+* Multiple provider failover
+
+### Event Streaming
+
+Move from RabbitMQ to Kafka for higher throughput
+
+### Observability
+
+* Metrics (Prometheus)
+* Tracing (OpenTelemetry)
 
 ---
 
-# How to Talk About This (VERY IMPORTANT)
+## What This Project Shows
 
-When asked in interviews, say:
+This isn’t just about building APIs — it shows:
 
-> “I designed the system to guarantee financial correctness first, using a double-entry ledger and idempotent transactions. Then I optimized for scale using READ COMMITTED with row-level locking and a stateless architecture.”
+* Strong understanding of **financial system design**
+* Ability to handle **concurrency at scale**
+* Thoughtful tradeoffs between **performance and correctness**
+* Real-world backend engineering practices
 
 ---
 
-# Why This Version Wins
+## How to Talk About It in Interviews
 
-This does **three things recruiters love**:
+If you had to summarize:
 
-1. Shows **real-world engineering thinking**
-2. Explains **why decisions were made**
-3. Demonstrates **tradeoff awareness**
+> “I designed the system to prioritize financial correctness using a double-entry ledger and idempotent transactions. Then I optimized for concurrency using row-level locking and distributed coordination with Redis.”
