@@ -1,5 +1,5 @@
-import { NestFactory, HttpAdapterHost } from '@nestjs/core';
-import { ValidationPipe, VersioningType, HttpStatus, BadRequestException } from '@nestjs/common';
+import { NestFactory, HttpAdapterHost, Reflector } from '@nestjs/core';
+import { ValidationPipe, VersioningType, HttpStatus, BadRequestException, ClassSerializerInterceptor } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
@@ -57,8 +57,10 @@ async function bootstrap() {
 
   const httpAdapterHost = app.get(HttpAdapterHost);
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
-
-  app.useGlobalInterceptors(new TransformInterceptor());
+  app.useGlobalInterceptors(
+    new TransformInterceptor(),
+    new ClassSerializerInterceptor(app.get(Reflector)),
+  );
 
   const config = new DocumentBuilder()
     .setTitle('FX Trading API')

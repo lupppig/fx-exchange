@@ -37,8 +37,8 @@ import { TransactionsConsumer } from './transactions.consumer.js';
       },
     ]),
   ],
-  controllers: [TransactionsController],
-  providers: [TransactionsService, TransactionsConsumer],
+  controllers: [TransactionsController, TransactionsConsumer],
+  providers: [TransactionsService],
   exports: [TransactionsService],
 })
 export class TransactionsModule implements NestModule {

@@ -7,9 +7,11 @@ import {
   Index,
   Check,
 } from 'typeorm';
+import { Expose } from 'class-transformer';
 import { TransactionType } from '../enums/transaction-type.enum.js';
 import { TransactionPurpose } from '../enums/transaction-purpose.enum.js';
 import { TransactionStatus } from '../enums/transaction-status.enum.js';
+import { getSubunitFactor } from '../../wallet/utils/currency.util.js';
 
 @Entity('transaction_logs')
 @Check(`"amount" > 0`)
@@ -42,13 +44,34 @@ export class TransactionLog {
   currency!: string;
 
   @Column({ type: 'bigint' })
+  @Expose({ name: 'amountSubunits' })
   amount!: number;
 
-  @Column({ type: 'bigint' })
-  balanceBefore!: number;
+  @Expose()
+  get amountDecimal(): number {
+    const factor = getSubunitFactor(this.currency);
+    return Number(this.amount) / factor;
+  }
 
   @Column({ type: 'bigint' })
+  @Expose({ name: 'balanceBeforeSubunits' })
+  balanceBefore!: number;
+
+  @Expose()
+  get balanceBeforeDecimal(): number {
+    const factor = getSubunitFactor(this.currency);
+    return Number(this.balanceBefore) / factor;
+  }
+
+  @Column({ type: 'bigint' })
+  @Expose({ name: 'balanceAfterSubunits' })
   balanceAfter!: number;
+
+  @Expose()
+  get balanceAfterDecimal(): number {
+    const factor = getSubunitFactor(this.currency);
+    return Number(this.balanceAfter) / factor;
+  }
 
   @Column({ type: 'decimal', precision: 18, scale: 8, nullable: true })
   exchangeRate!: number | null;

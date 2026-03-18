@@ -9,7 +9,9 @@ import {
   JoinColumn,
   Check,
 } from 'typeorm';
+import { Expose } from 'class-transformer';
 import { Wallet } from './wallet.entity.js';
+import { getSubunitFactor } from '../utils/currency.util.js';
 
 @Entity('balances')
 @Unique(['walletId', 'currency'])
@@ -30,7 +32,14 @@ export class Balance {
   currency!: string;
 
   @Column({ type: 'bigint', default: 0 })
+  @Expose({ name: 'amountSubunits' })
   amount!: number;
+
+  @Expose()
+  get amountDecimal(): number {
+    const factor = getSubunitFactor(this.currency);
+    return Number(this.amount) / factor;
+  }
 
   @CreateDateColumn()
   createdAt!: Date;

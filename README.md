@@ -162,6 +162,7 @@ Financial correctness is the highest priority in this system. To achieve this, w
 *   **Subunit Denominations**: All balances are stored as **integers** in their smallest possible unit (e.g., 100 NGN is stored as `10000` kobo).
 *   **Precision Loss Protection**: During currency conversion, the system calculates the exchange but rounds to the nearest whole subunit. If a trade amount is so small that it results in less than 1 whole subunit (e.g., converting 1 kobo to USD), the transaction is **rejected** to prevent "value leakage" and keep the ledger perfectly balanced.
 *   **Database Schema**: The `amount` columns in PostgreSQL utilize the `BIGINT` type, ensuring we can handle extremely large balances without the rounding errors associated with `DECIMAL` or `FLOAT` in high-volume environments.
+*   **Dual-Unit API Representation**: To avoid ambiguity (e.g., mistaking 1000 kobo for 1000 Naira), all financial responses provide both `*Subunits` (the raw integer) and `*Decimal` (the human-readable major unit). This ensures the API is intuitive for users while remaining mathematically perfect for core systems.
 
 ---
 

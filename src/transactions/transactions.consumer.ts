@@ -1,5 +1,5 @@
 import { Controller, Logger } from '@nestjs/common';
-import { MessagePattern, Payload, Ctx, RmqContext } from '@nestjs/microservices';
+import { EventPattern, Payload, Ctx, RmqContext } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TransactionLog } from './entities/transaction-log.entity.js';
@@ -13,7 +13,7 @@ export class TransactionsConsumer {
     private readonly repo: Repository<TransactionLog>,
   ) {}
 
-  @MessagePattern('record_transaction')
+  @EventPattern('record_transaction')
   async handleRecord(@Payload() data: any, @Ctx() context: RmqContext) {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
@@ -28,7 +28,7 @@ export class TransactionsConsumer {
     }
   }
 
-  @MessagePattern('update_transaction')
+  @EventPattern('update_transaction')
   async handleUpdate(@Payload() data: { id: string; update: any }, @Ctx() context: RmqContext) {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
