@@ -7,10 +7,12 @@ import { JournalEntry } from './entities/journal-entry.entity.js';
 import { TransactionsService } from './transactions.service.js';
 import { TransactionsController } from './transactions.controller.js';
 import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
+import { OutboxModule } from '../common/outbox/outbox.module.js';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([TransactionLog, JournalEntry]),
+    OutboxModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

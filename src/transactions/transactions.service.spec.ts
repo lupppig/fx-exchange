@@ -7,10 +7,12 @@ import { JournalEntry } from './entities/journal-entry.entity.js';
 import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
 import { TransactionStatus } from './enums/transaction-status.enum.js';
+import { OutboxService } from '../common/outbox/outbox.service.js';
 
 describe('TransactionsService', () => {
   let service: TransactionsService;
   let journalRepo: Repository<JournalEntry>;
+  let outboxService: OutboxService;
   let mockQueryRunner: QueryRunner;
 
   beforeEach(async () => {
@@ -55,6 +57,12 @@ describe('TransactionsService', () => {
             createQueryBuilder: jest.fn(),
           },
         },
+        {
+          provide: OutboxService,
+          useValue: {
+            addToOutbox: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+          },
+        },
       ],
     }).compile();
 
@@ -62,10 +70,11 @@ describe('TransactionsService', () => {
     journalRepo = module.get<Repository<JournalEntry>>(
       getRepositoryToken(JournalEntry),
     );
+    outboxService = module.get<OutboxService>(OutboxService);
   });
 
   describe('recordJournalEntry', () => {
-    it('should persist journal and entries via QueryRunner and return saved journal', async () => {
+    it('should persist journal, write to outbox, and return saved journal', async () => {
       const options = {
         walletId: 'w1',
         userId: 'u1',
@@ -95,7 +104,16 @@ describe('TransactionsService', () => {
           status: TransactionStatus.PENDING,
         }),
       );
-      expect(mockQueryRunner.manager.save).toHaveBeenCalled();
+      expect(outboxService.addToOutbox).toHaveBeenCalledWith(
+        'journal.created',
+        expect.objectContaining({
+          journalId: 'journal-123',
+          walletId: 'w1',
+          userId: 'u1',
+          purpose: TransactionPurpose.FUNDING,
+        }),
+        mockQueryRunner,
+      );
       expect(result.id).toBe('journal-123');
       expect(result.entries).toHaveLength(1);
     });
@@ -132,6 +150,7 @@ describe('TransactionsService', () => {
       const result = await service.recordJournalEntry(options, mockQueryRunner);
 
       expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(2);
+      expect(outboxService.addToOutbox).toHaveBeenCalled();
       expect(result.entries).toHaveLength(1);
       expect(result.exchangeRate).toBe(0.0006);
     });

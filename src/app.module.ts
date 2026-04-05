@@ -6,6 +6,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { WinstonModule, utilities as nestWinstonUtilities } from 'nest-winston';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { BullModule } from '@nestjs/bullmq';
+import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
 import * as winston from 'winston';
 import { envValidationSchema } from './config/env.validation.js';
 import { HealthModule } from './health/health.module.js';
@@ -15,6 +16,7 @@ import { WalletModule } from './wallet/wallet.module.js';
 import { FxModule } from './fx/fx.module.js';
 import { TransactionsModule } from './transactions/transactions.module.js';
 import { LockModule } from './common/lock/lock.module.js';
+import { OutboxModule } from './common/outbox/outbox.module.js';
 import { User } from './users/user.entity.js';
 
 @Module({
@@ -53,6 +55,22 @@ import { User } from './users/user.entity.js';
         },
       ],
     }),
+    RabbitMQModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        exchanges: [
+          {
+            name: 'fx_exchange_events',
+            type: 'topic',
+            options: { durable: true },
+          },
+        ],
+        uri: config.get<string>('RABBITMQ_URL', 'amqp://localhost'),
+        connectionInitOptions: { wait: false },
+        enableControllerDiscovery: false,
+      }),
+    }),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -84,6 +102,7 @@ import { User } from './users/user.entity.js';
         }),
       ],
     }),
+    OutboxModule,
     HealthModule,
     UsersModule,
     AuthModule,

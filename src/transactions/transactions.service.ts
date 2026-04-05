@@ -6,6 +6,7 @@ import { TransactionLog } from './entities/transaction-log.entity.js';
 import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
 import { TransactionStatus } from './enums/transaction-status.enum.js';
+import { OutboxService } from '../common/outbox/outbox.service.js';
 
 export interface LedgerEntryInput {
   walletId: string;
@@ -32,6 +33,7 @@ export class TransactionsService {
   constructor(
     @InjectRepository(JournalEntry)
     private readonly journalRepo: Repository<JournalEntry>,
+    private readonly outboxService: OutboxService,
   ) {}
 
   /**
@@ -68,6 +70,21 @@ export class TransactionsService {
     );
 
     await queryRunner.manager.save(entries);
+
+    await this.outboxService.addToOutbox(
+      'journal.created',
+      {
+        journalId: savedJournal.id,
+        walletId: options.walletId,
+        userId: options.userId,
+        purpose: options.purpose,
+        status: options.status ?? TransactionStatus.PENDING,
+        idempotencyKey: options.idempotencyKey,
+        exchangeRate: options.exchangeRate ?? null,
+        entries: options.entries,
+      },
+      queryRunner,
+    );
 
     const saved = await queryRunner.manager.findOne(JournalEntry, {
       where: { id: savedJournal.id },
