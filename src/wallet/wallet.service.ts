@@ -270,20 +270,20 @@ export class WalletService {
       }
     }
 
-    const rates = await this.fxService.getRates();
-    const exchangeRate = rates.rates[toCurrency] / rates.rates[fromCurrency];
-
-    const fromFactor = getSubunitFactor(fromCurrency);
-    const toFactor = getSubunitFactor(toCurrency);
-    const majorAmount = amount / fromFactor;
-    const convertedMajor = majorAmount * exchangeRate;
-    const convertedAmount = Math.round(convertedMajor * toFactor);
-
-    if (convertedAmount <= 0) {
-      throw new BadRequestException(`Amount too small to ${context}.`);
-    }
-
     return this.lockService.acquire(`wallet:${userId}`, 10000, async () => {
+      const rates = await this.fxService.getRates();
+      const exchangeRate = rates.rates[toCurrency] / rates.rates[fromCurrency];
+
+      const fromFactor = getSubunitFactor(fromCurrency);
+      const toFactor = getSubunitFactor(toCurrency);
+      const majorAmount = amount / fromFactor;
+      const convertedMajor = majorAmount * exchangeRate;
+      const convertedAmount = Math.round(convertedMajor * toFactor);
+
+      if (convertedAmount <= 0) {
+        throw new BadRequestException(`Amount too small to ${context}.`);
+      }
+
       let wallet = await this.walletRepository.findOne({ where: { userId } });
       if (!wallet) {
         wallet = this.walletRepository.create({ userId });
@@ -342,7 +342,6 @@ export class WalletService {
         const toBefore = Number(toBalance.amount);
         const toAfter = Number(toBefore) + Number(convertedAmount);
 
-        // Create journal entry atomically with balance updates
         const journal = await this.transactionsService.recordJournalEntry(
           {
             walletId: wallet.id,
