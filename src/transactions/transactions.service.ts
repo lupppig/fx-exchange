@@ -1,10 +1,8 @@
-import { plainToInstance } from 'class-transformer';
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ClientProxy } from '@nestjs/microservices';
-import { Repository } from 'typeorm';
-import { v4 as uuidv4 } from 'uuid';
+import { QueryRunner, Repository } from 'typeorm';
 import { JournalEntry } from './entities/journal-entry.entity.js';
+import { TransactionLog } from './entities/transaction-log.entity.js';
 import { TransactionType } from './enums/transaction-type.enum.js';
 import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
 import { TransactionStatus } from './enums/transaction-status.enum.js';
@@ -34,59 +32,88 @@ export class TransactionsService {
   constructor(
     @InjectRepository(JournalEntry)
     private readonly journalRepo: Repository<JournalEntry>,
-    @Inject('TRANSACTIONS_SERVICE') private readonly client: ClientProxy,
   ) {}
 
   /**
-   * Records a journal entry with its linked ledger entries asynchronously via RabbitMQ.
-   * Returns the journal entry immediately for a fast API response.
+   * Records a journal entry with its linked ledger entries synchronously
+   * within the provided QueryRunner's transaction.
+   * Returns the persisted journal entry.
    */
   async recordJournalEntry(
     options: RecordJournalOptions,
+    queryRunner: QueryRunner,
   ): Promise<JournalEntry> {
-    const journalId = uuidv4();
-    const now = new Date();
-
-    const entries = options.entries.map((entry) => ({
-      ...entry,
-      id: uuidv4(),
-      journalEntryId: journalId,
-      createdAt: now,
-    }));
-
-    const journalData = {
-      id: journalId,
+    const journal = queryRunner.manager.create(JournalEntry, {
       walletId: options.walletId,
       userId: options.userId,
       purpose: options.purpose,
       status: options.status ?? TransactionStatus.PENDING,
       idempotencyKey: options.idempotencyKey,
       exchangeRate: options.exchangeRate ?? null,
-      entries,
-      createdAt: now,
-      updatedAt: now,
-    };
+    });
 
-    this.client.emit('record_journal', journalData);
+    const savedJournal = await queryRunner.manager.save(journal);
 
-    return plainToInstance(JournalEntry, journalData);
+    const entries = options.entries.map((entry) =>
+      queryRunner.manager.create(TransactionLog, {
+        journalEntry: savedJournal,
+        walletId: entry.walletId,
+        userId: entry.userId,
+        type: entry.type,
+        currency: entry.currency,
+        amount: entry.amount,
+        balanceBefore: entry.balanceBefore,
+        balanceAfter: entry.balanceAfter,
+      }),
+    );
+
+    await queryRunner.manager.save(entries);
+
+    const saved = await queryRunner.manager.findOne(JournalEntry, {
+      where: { id: savedJournal.id },
+      relations: ['entries'],
+    });
+
+    if (!saved) {
+      throw new Error('Failed to retrieve saved journal entry');
+    }
+
+    return saved;
   }
 
   /**
-   * Updates the status of a journal entry asynchronously via RabbitMQ.
+   * Updates the status of a journal entry and its ledger entries
+   * synchronously within the provided QueryRunner's transaction.
    */
   async updateJournalStatus(
     journalId: string,
     status: TransactionStatus,
-    entryUpdates?: { entryId: string; balanceBefore: number; balanceAfter: number }[],
+    queryRunner: QueryRunner,
+    entryUpdates?: {
+      entryId: string;
+      balanceBefore: number;
+      balanceAfter: number;
+    }[],
   ): Promise<void> {
-    this.client.emit('update_journal', { journalId, status, entryUpdates });
+    await queryRunner.manager.update(JournalEntry, journalId, { status });
+
+    if (entryUpdates) {
+      for (const update of entryUpdates) {
+        await queryRunner.manager.update(TransactionLog, update.entryId, {
+          balanceBefore: update.balanceBefore,
+          balanceAfter: update.balanceAfter,
+        });
+      }
+    }
   }
 
   /**
    * Finds a journal entry by its idempotency key (synchronous DB read).
    */
-  async findByIdempotencyKey(userId: string, key: string): Promise<JournalEntry | null> {
+  async findByIdempotencyKey(
+    userId: string,
+    key: string,
+  ): Promise<JournalEntry | null> {
     return this.journalRepo.findOne({
       where: { userId, idempotencyKey: key },
       relations: ['entries'],
@@ -121,7 +148,9 @@ export class TransactionsService {
     }
 
     if (currency) {
-      qb.andWhere('entry.currency = :currency', { currency: currency.toUpperCase() });
+      qb.andWhere('entry.currency = :currency', {
+        currency: currency.toUpperCase(),
+      });
     }
 
     if (type) {
@@ -136,7 +165,9 @@ export class TransactionsService {
 
     const hasNextPage = journals.length > limit;
     const items = hasNextPage ? journals.slice(0, limit) : journals;
-    const nextCursor = hasNextPage ? items[items.length - 1].createdAt.toISOString() : null;
+    const nextCursor = hasNextPage
+      ? items[items.length - 1].createdAt.toISOString()
+      : null;
 
     return {
       items,

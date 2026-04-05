@@ -1,5 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DataSource, Repository, EntityManager, QueryRunner, SelectQueryBuilder } from 'typeorm';
+import {
+  DataSource,
+  Repository,
+  EntityManager,
+  QueryRunner,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { WalletService } from './wallet.service.js';
 import { Wallet } from './entities/wallet.entity.js';
@@ -64,14 +70,15 @@ describe('WalletService', () => {
           provide: TransactionsService,
           useValue: {
             recordJournalEntry: jest.fn(),
-            updateJournalStatus: jest.fn(),
             findByIdempotencyKey: jest.fn(),
           },
         },
         {
           provide: LockService,
           useValue: {
-            acquire: jest.fn().mockImplementation((_resource, _ttl, action) => action()),
+            acquire: jest
+              .fn()
+              .mockImplementation((_resource, _ttl, action) => action()),
           },
         },
         {
@@ -107,7 +114,9 @@ describe('WalletService', () => {
   describe('getWallet', () => {
     it('should return existing wallet', async () => {
       const mockWallet = { id: mockWalletId, userId: mockUserId, balances: [] };
-      jest.spyOn(walletRepo, 'findOne').mockResolvedValue(mockWallet as unknown as Wallet);
+      jest
+        .spyOn(walletRepo, 'findOne')
+        .mockResolvedValue(mockWallet as unknown as Wallet);
 
       const result = await service.getWallet(mockUserId);
 
@@ -118,8 +127,12 @@ describe('WalletService', () => {
     it('should create new wallet if not found', async () => {
       jest.spyOn(walletRepo, 'findOne').mockResolvedValue(null);
       const newWallet = { id: mockWalletId, userId: mockUserId, balances: [] };
-      jest.spyOn(walletRepo, 'create').mockReturnValue(newWallet as unknown as Wallet);
-      jest.spyOn(walletRepo, 'save').mockResolvedValue(newWallet as unknown as Wallet);
+      jest
+        .spyOn(walletRepo, 'create')
+        .mockReturnValue(newWallet as unknown as Wallet);
+      jest
+        .spyOn(walletRepo, 'save')
+        .mockResolvedValue(newWallet as unknown as Wallet);
 
       const result = await service.getWallet(mockUserId);
 
@@ -133,11 +146,20 @@ describe('WalletService', () => {
       const journal = {
         id: 'journal-1',
         status: TransactionStatus.SUCCESS,
-        entries: [{ type: TransactionType.CREDIT, currency: 'NGN', amount: 100000 }],
+        entries: [
+          { type: TransactionType.CREDIT, currency: 'NGN', amount: 100000 },
+        ],
       };
-      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(journal as any);
+      jest
+        .spyOn(transactionsService, 'findByIdempotencyKey')
+        .mockResolvedValue(journal as any);
 
-      const result = await service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key');
+      const result = await service.fundWallet(
+        mockUserId,
+        'NGN',
+        100000,
+        'idem-key',
+      );
 
       expect(result.message).toContain('idempotent');
       expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
@@ -145,19 +167,42 @@ describe('WalletService', () => {
 
     it('should fail if transaction is PENDING', async () => {
       const journal = { id: 'journal-1', status: TransactionStatus.PENDING };
-      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(journal as any);
+      jest
+        .spyOn(transactionsService, 'findByIdempotencyKey')
+        .mockResolvedValue(journal as any);
 
-      await expect(service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key'))
-        .rejects.toThrow('Transaction is currently being processed');
+      await expect(
+        service.fundWallet(mockUserId, 'NGN', 100000, 'idem-key'),
+      ).rejects.toThrow('Transaction is currently being processed');
     });
 
-    it('should create journal entry with CREDIT entry and update on success', async () => {
-      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(null);
-      jest.spyOn(transactionsService, 'recordJournalEntry').mockResolvedValue({
-        id: 'journal-pending',
-        entries: [{ id: 'entry-credit', type: TransactionType.CREDIT }],
-      } as any);
-      
+    it('should create journal entry with paired CREDIT + DEBIT entries in single transaction', async () => {
+      jest
+        .spyOn(transactionsService, 'findByIdempotencyKey')
+        .mockResolvedValue(null);
+
+      const mockJournal = {
+        id: 'journal-123',
+        status: TransactionStatus.SUCCESS,
+        entries: [
+          {
+            id: 'entry-credit',
+            type: TransactionType.CREDIT,
+            currency: 'NGN',
+            amount: 50000,
+          },
+          {
+            id: 'entry-debit',
+            type: TransactionType.DEBIT,
+            currency: 'NGN',
+            amount: 50000,
+          },
+        ],
+      };
+      jest
+        .spyOn(transactionsService, 'recordJournalEntry')
+        .mockResolvedValue(mockJournal as any);
+
       const wallet = { id: mockWalletId, userId: mockUserId };
       jest.spyOn(walletRepo, 'findOne').mockResolvedValue(wallet as any);
 
@@ -167,83 +212,118 @@ describe('WalletService', () => {
         getOne: jest.fn().mockResolvedValue(null),
       } as unknown as SelectQueryBuilder<Balance>;
 
-      jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
-      jest.spyOn(manager, 'create').mockImplementation((_entity: any, props: any) => props);
+      jest
+        .spyOn(manager, 'createQueryBuilder')
+        .mockReturnValue(mockQueryBuilder);
+      jest
+        .spyOn(manager, 'create')
+        .mockImplementation((_entity: any, props: any) => props);
       jest.spyOn(manager, 'save').mockImplementation(async (obj: any) => obj);
 
-      const result = await service.fundWallet(mockUserId, 'NGN', 50000, 'idem-key');
+      const result = await service.fundWallet(
+        mockUserId,
+        'NGN',
+        50000,
+        'idem-key',
+      );
 
-      expect(transactionsService.recordJournalEntry).toHaveBeenCalled();
-      expect(transactionsService.updateJournalStatus).toHaveBeenCalledWith(
-        'journal-pending',
-        TransactionStatus.SUCCESS,
-        [expect.objectContaining({ entryId: 'entry-credit' })],
+      expect(transactionsService.recordJournalEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: expect.any(String),
+          status: TransactionStatus.SUCCESS,
+          entries: expect.arrayContaining([
+            expect.objectContaining({ type: TransactionType.CREDIT }),
+            expect.objectContaining({ type: TransactionType.DEBIT }),
+          ]),
+        }),
+        queryRunner,
       );
       expect(result.message).toBe('Wallet funded successfully');
+      expect(queryRunner.commitTransaction).toHaveBeenCalled();
     });
 
-    it('should update journal status to FAILED on error', async () => {
-      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(null);
-      jest.spyOn(walletRepo, 'findOne').mockResolvedValue({ id: mockWalletId } as any);
-      jest.spyOn(transactionsService, 'recordJournalEntry').mockResolvedValue({
-        id: 'journal-pending',
-        entries: [{ id: 'entry-credit' }],
-      } as any);
+    it('should rollback transaction on error', async () => {
+      jest
+        .spyOn(transactionsService, 'findByIdempotencyKey')
+        .mockResolvedValue(null);
+      jest
+        .spyOn(walletRepo, 'findOne')
+        .mockResolvedValue({ id: mockWalletId } as any);
+      jest
+        .spyOn(transactionsService, 'recordJournalEntry')
+        .mockRejectedValue(new Error('DB Error'));
 
-      jest.spyOn(manager, 'createQueryBuilder').mockImplementation(() => {
-        throw new Error('DB Error');
-      });
-
-      await expect(service.fundWallet(mockUserId, 'NGN', 10000, 'idem-key')).rejects.toThrow();
+      await expect(
+        service.fundWallet(mockUserId, 'NGN', 10000, 'idem-key'),
+      ).rejects.toThrow();
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
-      expect(transactionsService.updateJournalStatus).toHaveBeenCalledWith(
-        'journal-pending',
-        TransactionStatus.FAILED,
-      );
     });
   });
 
   describe('convertFunds', () => {
-    it('should create journal with paired DEBIT + CREDIT entries', async () => {
-      jest.spyOn(transactionsService, 'findByIdempotencyKey').mockResolvedValue(null);
-      jest.spyOn(transactionsService, 'recordJournalEntry').mockResolvedValue({
+    it('should create journal with paired DEBIT + CREDIT entries in single transaction', async () => {
+      jest
+        .spyOn(transactionsService, 'findByIdempotencyKey')
+        .mockResolvedValue(null);
+
+      const mockJournal = {
         id: 'journal-conv',
+        status: TransactionStatus.SUCCESS,
         entries: [
           { id: 'entry-debit', type: TransactionType.DEBIT },
           { id: 'entry-credit', type: TransactionType.CREDIT },
         ],
-      } as any);
+      };
+      jest
+        .spyOn(transactionsService, 'recordJournalEntry')
+        .mockResolvedValue(mockJournal as any);
 
       jest.spyOn(fxService, 'getRates').mockResolvedValue({
         version: 'v1',
         rates: { NGN: 1, USD: 0.0006 },
       } as any);
 
-      jest.spyOn(walletRepo, 'findOne').mockResolvedValue({ id: mockWalletId } as any);
+      jest
+        .spyOn(walletRepo, 'findOne')
+        .mockResolvedValue({ id: mockWalletId } as any);
 
       const mockQueryBuilder = {
         setLock: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        getOne: jest.fn()
-          .mockResolvedValueOnce({ id: 'bal-ngn', currency: 'NGN', amount: 500000 })
+        getOne: jest
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'bal-ngn',
+            currency: 'NGN',
+            amount: 500000,
+          })
           .mockResolvedValueOnce({ id: 'bal-usd', currency: 'USD', amount: 0 }),
       } as unknown as SelectQueryBuilder<Balance>;
 
-      jest.spyOn(manager, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
+      jest
+        .spyOn(manager, 'createQueryBuilder')
+        .mockReturnValue(mockQueryBuilder);
 
-      const result = await service.convertFunds(mockUserId, 'NGN', 'USD', 200000, 'idem-key');
+      const result = await service.convertFunds(
+        mockUserId,
+        'NGN',
+        'USD',
+        200000,
+        'idem-key',
+      );
 
       expect(result.status).toBe(TransactionStatus.SUCCESS);
-      expect(transactionsService.recordJournalEntry).toHaveBeenCalledTimes(1);
-      expect(transactionsService.updateJournalStatus).toHaveBeenCalledWith(
-        'journal-conv',
-        TransactionStatus.SUCCESS,
-        expect.arrayContaining([
-          expect.objectContaining({ entryId: 'entry-debit' }),
-          expect.objectContaining({ entryId: 'entry-credit' }),
-        ]),
+      expect(transactionsService.recordJournalEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entries: expect.arrayContaining([
+            expect.objectContaining({ type: TransactionType.DEBIT }),
+            expect.objectContaining({ type: TransactionType.CREDIT }),
+          ]),
+        }),
+        queryRunner,
       );
+      expect(queryRunner.commitTransaction).toHaveBeenCalled();
     });
   });
 });

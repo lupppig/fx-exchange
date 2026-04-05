@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ClientProxy } from '@nestjs/microservices';
+import { Repository, QueryRunner } from 'typeorm';
 import { TransactionsService } from './transactions.service.js';
 import { TransactionLog } from './entities/transaction-log.entity.js';
 import { JournalEntry } from './entities/journal-entry.entity.js';
@@ -12,19 +11,43 @@ import { TransactionStatus } from './enums/transaction-status.enum.js';
 describe('TransactionsService', () => {
   let service: TransactionsService;
   let journalRepo: Repository<JournalEntry>;
-  let client: ClientProxy;
+  let mockQueryRunner: QueryRunner;
 
   beforeEach(async () => {
+    mockQueryRunner = {
+      manager: {
+        create: jest.fn().mockImplementation((_entity, data) => ({ ...data })),
+        save: jest.fn().mockImplementation(async (entity) => {
+          if (Array.isArray(entity)) {
+            return entity.map((e, i) => ({ ...e, id: `entry-${i}` }));
+          }
+          return { ...entity, id: 'journal-123' };
+        }),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+        findOne: jest.fn().mockImplementation(async (_entity, options) => ({
+          id: 'journal-123',
+          walletId: options.where?.id ? 'w1' : undefined,
+          exchangeRate: 0.0006,
+          entries: [
+            {
+              id: 'entry-0',
+              journalEntryId: 'journal-123',
+              walletId: 'w1',
+              userId: 'u1',
+              type: TransactionType.CREDIT,
+              currency: 'USD',
+              amount: 1000,
+              balanceBefore: 0,
+              balanceAfter: 1000,
+            },
+          ],
+        })),
+      },
+    } as unknown as QueryRunner;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TransactionsService,
-        {
-          provide: getRepositoryToken(TransactionLog),
-          useValue: {
-            findOne: jest.fn(),
-            createQueryBuilder: jest.fn(),
-          },
-        },
         {
           provide: getRepositoryToken(JournalEntry),
           useValue: {
@@ -32,22 +55,17 @@ describe('TransactionsService', () => {
             createQueryBuilder: jest.fn(),
           },
         },
-        {
-          provide: 'TRANSACTIONS_SERVICE',
-          useValue: {
-            emit: jest.fn(),
-          },
-        },
       ],
     }).compile();
 
     service = module.get<TransactionsService>(TransactionsService);
-    journalRepo = module.get<Repository<JournalEntry>>(getRepositoryToken(JournalEntry));
-    client = module.get<ClientProxy>('TRANSACTIONS_SERVICE');
+    journalRepo = module.get<Repository<JournalEntry>>(
+      getRepositoryToken(JournalEntry),
+    );
   });
 
   describe('recordJournalEntry', () => {
-    it('should emit record_journal message and return journal with entries', async () => {
+    it('should persist journal and entries via QueryRunner and return saved journal', async () => {
       const options = {
         walletId: 'w1',
         userId: 'u1',
@@ -66,25 +84,19 @@ describe('TransactionsService', () => {
         ],
       };
 
-      const result = await service.recordJournalEntry(options);
+      const result = await service.recordJournalEntry(options, mockQueryRunner);
 
-      expect(client.emit).toHaveBeenCalledWith('record_journal', expect.objectContaining({
-        id: expect.any(String),
-        walletId: 'w1',
-        userId: 'u1',
-        purpose: TransactionPurpose.FUNDING,
-        status: TransactionStatus.PENDING,
-        entries: expect.arrayContaining([
-          expect.objectContaining({
-            id: expect.any(String),
-            journalEntryId: expect.any(String),
-            type: TransactionType.CREDIT,
-            currency: 'USD',
-            amount: 1000,
-          }),
-        ]),
-      }));
-      expect(result.id).toBeDefined();
+      expect(mockQueryRunner.manager.create).toHaveBeenCalledWith(
+        JournalEntry,
+        expect.objectContaining({
+          walletId: 'w1',
+          userId: 'u1',
+          purpose: TransactionPurpose.FUNDING,
+          status: TransactionStatus.PENDING,
+        }),
+      );
+      expect(mockQueryRunner.manager.save).toHaveBeenCalled();
+      expect(result.id).toBe('journal-123');
       expect(result.entries).toHaveLength(1);
     });
 
@@ -117,26 +129,51 @@ describe('TransactionsService', () => {
         ],
       };
 
-      const result = await service.recordJournalEntry(options);
+      const result = await service.recordJournalEntry(options, mockQueryRunner);
 
-      expect(result.entries).toHaveLength(2);
-      expect(result.entries[0].type).toBe(TransactionType.DEBIT);
-      expect(result.entries[1].type).toBe(TransactionType.CREDIT);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(2);
+      expect(result.entries).toHaveLength(1);
       expect(result.exchangeRate).toBe(0.0006);
     });
   });
 
   describe('updateJournalStatus', () => {
-    it('should emit update_journal message', async () => {
-      await service.updateJournalStatus('journal-123', TransactionStatus.SUCCESS, [
-        { entryId: 'entry-1', balanceBefore: 0, balanceAfter: 1000 },
-      ]);
+    it('should update journal status via QueryRunner', async () => {
+      await service.updateJournalStatus(
+        'journal-123',
+        TransactionStatus.SUCCESS,
+        mockQueryRunner,
+      );
 
-      expect(client.emit).toHaveBeenCalledWith('update_journal', {
-        journalId: 'journal-123',
-        status: TransactionStatus.SUCCESS,
-        entryUpdates: [{ entryId: 'entry-1', balanceBefore: 0, balanceAfter: 1000 }],
-      });
+      expect(mockQueryRunner.manager.update).toHaveBeenCalledWith(
+        JournalEntry,
+        'journal-123',
+        { status: TransactionStatus.SUCCESS },
+      );
+    });
+
+    it('should update entry balances when entryUpdates provided', async () => {
+      const entryUpdates = [
+        { entryId: 'entry-1', balanceBefore: 0, balanceAfter: 1000 },
+      ];
+
+      await service.updateJournalStatus(
+        'journal-123',
+        TransactionStatus.SUCCESS,
+        mockQueryRunner,
+        entryUpdates,
+      );
+
+      expect(mockQueryRunner.manager.update).toHaveBeenCalledWith(
+        JournalEntry,
+        'journal-123',
+        { status: TransactionStatus.SUCCESS },
+      );
+      expect(mockQueryRunner.manager.update).toHaveBeenCalledWith(
+        TransactionLog,
+        'entry-1',
+        { balanceBefore: 0, balanceAfter: 1000 },
+      );
     });
   });
 
@@ -165,7 +202,9 @@ describe('TransactionsService', () => {
         getMany: jest.fn().mockResolvedValue(mockJournals),
       };
 
-      jest.spyOn(journalRepo, 'createQueryBuilder').mockReturnValue(mockQueryBuilder as any);
+      jest
+        .spyOn(journalRepo, 'createQueryBuilder')
+        .mockReturnValue(mockQueryBuilder as any);
 
       const result = await service.getTransactions('u1', { limit: 10 });
 

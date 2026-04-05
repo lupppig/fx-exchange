@@ -1,7 +1,6 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
-import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TransactionLog } from './entities/transaction-log.entity.js';
 import { JournalEntry } from './entities/journal-entry.entity.js';
@@ -20,23 +19,6 @@ import { TransactionsConsumer } from './transactions.consumer.js';
         secret: config.get('JWT_SECRET'),
       }),
     }),
-    ClientsModule.registerAsync([
-      {
-        name: 'TRANSACTIONS_SERVICE',
-        imports: [ConfigModule],
-        inject: [ConfigService],
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [config.get<string>('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672')],
-            queue: 'transaction_logs',
-            queueOptions: {
-              durable: true,
-            },
-          },
-        }),
-      },
-    ]),
   ],
   controllers: [TransactionsController, TransactionsConsumer],
   providers: [TransactionsService],
