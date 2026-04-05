@@ -17,6 +17,7 @@ import { FxModule } from './fx/fx.module.js';
 import { TransactionsModule } from './transactions/transactions.module.js';
 import { LockModule } from './common/lock/lock.module.js';
 import { OutboxModule } from './common/outbox/outbox.module.js';
+import { LoggingModule } from './common/logging/logging.module.js';
 import { User } from './users/user.entity.js';
 
 @Module({
@@ -88,19 +89,33 @@ import { User } from './users/user.entity.js';
         url: configService.get('REDIS_URL'),
       }),
     }),
-    WinstonModule.forRoot({
-      transports: [
-        new winston.transports.Console({
-          format: winston.format.combine(
-            winston.format.timestamp(),
-            winston.format.ms(),
-            nestWinstonUtilities.format.nestLike('FX-API', {
-              colors: true,
-              prettyPrint: true,
+    WinstonModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const isProduction = config.get('NODE_ENV') === 'production';
+
+        return {
+          transports: [
+            new winston.transports.Console({
+              format: isProduction
+                ? winston.format.combine(
+                    winston.format.timestamp(),
+                    winston.format.errors({ stack: true }),
+                    winston.format.json(),
+                  )
+                : winston.format.combine(
+                    winston.format.timestamp(),
+                    winston.format.ms(),
+                    nestWinstonUtilities.format.nestLike('FX-API', {
+                      colors: true,
+                      prettyPrint: true,
+                    }),
+                  ),
             }),
-          ),
-        }),
-      ],
+          ],
+        };
+      },
     }),
     OutboxModule,
     HealthModule,
