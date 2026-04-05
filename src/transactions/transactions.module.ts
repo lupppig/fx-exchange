@@ -7,7 +7,6 @@ import { JournalEntry } from './entities/journal-entry.entity.js';
 import { TransactionsService } from './transactions.service.js';
 import { TransactionsController } from './transactions.controller.js';
 import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
-import { TransactionsConsumer } from './transactions.consumer.js';
 
 @Module({
   imports: [
@@ -20,7 +19,7 @@ import { TransactionsConsumer } from './transactions.consumer.js';
       }),
     }),
   ],
-  controllers: [TransactionsController, TransactionsConsumer],
+  controllers: [TransactionsController],
   providers: [TransactionsService],
   exports: [TransactionsService],
 })
