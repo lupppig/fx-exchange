@@ -78,7 +78,7 @@ describe('WalletService', () => {
           useValue: {
             acquire: jest
               .fn()
-              .mockImplementation((_resource, _ttl, action) => action()),
+              .mockImplementation((_resource, action, _ttl) => action()),
           },
         },
         {
