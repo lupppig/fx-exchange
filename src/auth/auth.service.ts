@@ -44,8 +44,19 @@ export class AuthService {
     await this.redis.set(otpKey, hashedOtp, 'EX', 600);
     await this.redis.set(attemptsKey, 0, 'EX', 900);
 
+    this.logger.log({
+      message: 'User registered, OTP sent',
+      userId: user.id,
+      email: dto.email,
+    });
+
     this.mailService.sendOtp(user.email, otp).catch((err) => {
-      this.logger.error(`Failed to queue OTP email for ${user.email}`, err.stack);
+      this.logger.error({
+        message: 'Failed to send OTP email',
+        userId: user.id,
+        email: dto.email,
+        error: err.message,
+      });
     });
 
     return { message: 'Verification email sent' };
@@ -64,12 +75,23 @@ export class AuthService {
     const attempts = await this.redis.get(attemptsKey);
 
     if (!hashedOtp || (attempts && parseInt(attempts) >= 5)) {
+      this.logger.warn({
+        message: 'OTP verification failed - expired or max attempts',
+        userId: user.id,
+        email: dto.email,
+      });
       throw new BadRequestException('Invalid OTP');
     }
 
     const isValid = await bcrypt.compare(dto.otp, hashedOtp);
     if (!isValid) {
       await this.redis.incr(attemptsKey);
+      this.logger.warn({
+        message: 'Invalid OTP attempt',
+        userId: user.id,
+        email: dto.email,
+        attempts: attempts ? parseInt(attempts) + 1 : 1,
+      });
       throw new BadRequestException('Invalid OTP');
     }
 
@@ -78,27 +100,56 @@ export class AuthService {
     await this.redis.del(otpKey);
     await this.redis.del(attemptsKey);
 
+    this.logger.log({
+      message: 'User email verified',
+      userId: user.id,
+      email: dto.email,
+    });
+
     return { message: 'Email verified successfully' };
   }
 
   async signin(dto: SigninDto) {
     const user = await this.usersService.findByEmailWithPassword(dto.email);
     if (!user || !user.passwordHash) {
+      this.logger.warn({
+        message: 'Signin failed - user not found',
+        email: dto.email,
+      });
       throw new BadRequestException('Invalid credentials');
     }
 
-    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
     if (!isPasswordValid) {
+      this.logger.warn({
+        message: 'Signin failed - invalid password',
+        userId: user.id,
+        email: dto.email,
+      });
       throw new BadRequestException('Invalid credentials');
     }
 
     if (!user.isVerified) {
+      this.logger.warn({
+        message: 'Signin failed - email not verified',
+        userId: user.id,
+        email: dto.email,
+      });
       throw new BadRequestException('Please verify your email first');
     }
 
     const payload = { sub: user.id, email: user.email };
-    return {
-      access_token: await this.jwtService.signAsync(payload),
-    };
+    const token = await this.jwtService.signAsync(payload);
+
+    this.logger.log({
+      message: 'User signed in',
+      userId: user.id,
+      email: dto.email,
+    });
+
+    return { access_token: token };
   }
 }

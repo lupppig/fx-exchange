@@ -44,7 +44,11 @@ export class WalletService {
         return plainToInstance(WalletResponseDto, JSON.parse(cached));
       }
     } catch (error) {
-      this.logger.warn(`Failed to read wallet cache for ${userId}:`, error);
+      this.logger.warn({
+        message: 'Failed to read wallet cache',
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     let wallet = await this.walletRepository.findOne({
@@ -69,7 +73,11 @@ export class WalletService {
     try {
       await this.redis.set(cacheKey, JSON.stringify(result), 'EX', 3600);
     } catch (error) {
-      this.logger.warn(`Failed to cache wallet for ${userId}:`, error);
+      this.logger.warn({
+        message: 'Failed to cache wallet',
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     return result;
