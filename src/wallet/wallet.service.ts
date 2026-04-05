@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
@@ -19,6 +19,8 @@ import { WalletResponseDto } from './dto/wallet-response.dto.js';
 
 @Injectable()
 export class WalletService {
+  private readonly logger = new Logger(WalletService.name);
+
   constructor(
     @InjectRepository(Wallet)
     private readonly walletRepository: Repository<Wallet>,
@@ -41,7 +43,9 @@ export class WalletService {
       if (cached) {
         return plainToInstance(WalletResponseDto, JSON.parse(cached));
       }
-    } catch (error) {}
+    } catch (error) {
+      this.logger.warn(`Failed to read wallet cache for ${userId}:`, error);
+    }
 
     let wallet = await this.walletRepository.findOne({
       where: { userId },
@@ -64,7 +68,9 @@ export class WalletService {
 
     try {
       await this.redis.set(cacheKey, JSON.stringify(result), 'EX', 3600);
-    } catch (error) {}
+    } catch (error) {
+      this.logger.warn(`Failed to cache wallet for ${userId}:`, error);
+    }
 
     return result;
   }

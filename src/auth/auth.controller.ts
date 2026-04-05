@@ -1,5 +1,6 @@
 import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { VerifyOtpDto } from './dto/verify-otp.dto.js';
@@ -11,10 +12,12 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Register a new user',
-    description: 'Creates a new user account and triggers an OTP verification email.',
+    description:
+      'Creates a new user account and triggers an OTP verification email.',
   })
   @ApiResponse({
     status: HttpStatus.ACCEPTED,
@@ -51,6 +54,7 @@ export class AuthController {
   }
 
   @Post('verify')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Verify OTP',
@@ -91,6 +95,7 @@ export class AuthController {
   }
 
   @Post('signin')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'User Sign-in',
@@ -107,7 +112,10 @@ export class AuthController {
         data: {
           type: 'object',
           properties: {
-            access_token: { type: 'string', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
+            access_token: {
+              type: 'string',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+            },
           },
         },
       },
