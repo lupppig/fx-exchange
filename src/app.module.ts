@@ -29,7 +29,9 @@ import { User } from './users/user.entity.js';
         type: 'postgres',
         url: configService.get<string>('DATABASE_URL'),
         autoLoadEntities: true,
-        synchronize: configService.get<boolean>('DB_SYNC'),
+        synchronize: false,
+        migrationsRun: true,
+        migrations: ['src/migrations/*.ts'],
         entities: [User],
         ssl: configService.get<string>('DATABASE_URL')?.includes('neon.tech')
           ? { rejectUnauthorized: false }
