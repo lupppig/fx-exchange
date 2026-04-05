@@ -16,7 +16,7 @@ export class Wallet {
   @Column({ unique: true, nullable: false })
   userId!: string;
 
-  @OneToMany(() => Balance, (balance) => balance.wallet, { eager: true })
+  @OneToMany(() => Balance, (balance) => balance.wallet)
   balances!: Balance[];
 
   @CreateDateColumn()

@@ -134,7 +134,7 @@ export class WalletService {
       }
     }
 
-    return this.lockService.acquire(`wallet:${userId}`, 10000, async () => {
+    return this.lockService.acquire(`wallet:${userId}`, async () => {
       let wallet = await this.walletRepository.findOne({ where: { userId } });
       if (!wallet) {
         wallet = this.walletRepository.create({ userId });
@@ -284,7 +284,7 @@ export class WalletService {
       }
     }
 
-    return this.lockService.acquire(`wallet:${userId}`, 10000, async () => {
+    return this.lockService.acquire(`wallet:${userId}`, async () => {
       const rates = await this.fxService.getRates();
       const exchangeRate = rates.rates[toCurrency] / rates.rates[fromCurrency];
 

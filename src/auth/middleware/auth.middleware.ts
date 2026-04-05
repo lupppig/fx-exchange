@@ -1,7 +1,15 @@
-import { Injectable, NestMiddleware, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  NestMiddleware,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+
+interface AuthenticatedRequest extends Request {
+  user: Record<string, unknown>;
+}
 
 @Injectable()
 export class AuthMiddleware implements NestMiddleware {
@@ -14,7 +22,9 @@ export class AuthMiddleware implements NestMiddleware {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing or invalid authorization header');
+      throw new UnauthorizedException(
+        'Missing or invalid authorization header',
+      );
     }
 
     const token = authHeader.split(' ')[1];
@@ -23,7 +33,7 @@ export class AuthMiddleware implements NestMiddleware {
       const payload = await this.jwtService.verifyAsync(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
-      (req as any).user = payload;
+      (req as AuthenticatedRequest).user = payload;
       next();
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
