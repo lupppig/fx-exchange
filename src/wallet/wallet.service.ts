@@ -10,7 +10,7 @@ import { TransactionType } from '../transactions/enums/transaction-type.enum';
 import { TransactionPurpose } from '../transactions/enums/transaction-purpose.enum';
 import { TransactionStatus } from '../transactions/enums/transaction-status.enum';
 import { FxService } from '../fx/fx.service';
-import { getSubunitFactor } from './utils/currency.util';
+import { convertSubunits, crossRate, parseRate } from './utils/money';
 import { isSupportedCurrency } from '../common/constants/supported-currencies';
 import { JournalEntry } from '../transactions/entities/journal-entry.entity';
 import { TransactionsService } from '../transactions/transactions.service';
@@ -286,13 +286,23 @@ export class WalletService {
 
     return this.lockService.acquire(`wallet:${userId}`, async () => {
       const rates = await this.fxService.getRates();
-      const exchangeRate = rates.rates[toCurrency] / rates.rates[fromCurrency];
 
-      const fromFactor = getSubunitFactor(fromCurrency);
-      const toFactor = getSubunitFactor(toCurrency);
-      const majorAmount = amount / fromFactor;
-      const convertedMajor = majorAmount * exchangeRate;
-      const convertedAmount = Math.round(convertedMajor * toFactor);
+      // Cross rate computed via Decimal -- no IEEE 754 loss between the
+      // upstream provider quote and the final subunit rounding step.
+      const exchangeRateDecimal = crossRate(
+        parseRate(rates.rates[fromCurrency]),
+        parseRate(rates.rates[toCurrency]),
+      );
+      const exchangeRate = Number(exchangeRateDecimal.toFixed(8));
+
+      const convertedAmount = Number(
+        convertSubunits(
+          BigInt(amount),
+          fromCurrency,
+          toCurrency,
+          exchangeRateDecimal,
+        ),
+      );
 
       if (convertedAmount <= 0) {
         throw new BadRequestException(`Amount too small to ${context}.`);
