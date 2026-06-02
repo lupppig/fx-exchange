@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { FxService } from './fx.service';
 import { FxController } from './fx.controller';
+import { QuoteService } from './quote.service';
 import { AuthMiddleware } from '../auth/middleware/auth.middleware';
 
 @Module({
@@ -21,8 +22,8 @@ import { AuthMiddleware } from '../auth/middleware/auth.middleware';
     }),
   ],
   controllers: [FxController],
-  providers: [FxService],
-  exports: [FxService],
+  providers: [FxService, QuoteService],
+  exports: [FxService, QuoteService],
 })
 export class FxModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

@@ -1,12 +1,22 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { FxService, VersionedRates } from './fx.service';
+import { QuoteService, Quote } from './quote.service';
+import { CreateQuoteDto } from './dto/create-quote.dto';
+
+interface AuthedRequest extends Request {
+  user?: { id: string; email?: string };
+}
 
 @ApiTags('FX Rates')
 @ApiBearerAuth()
 @Controller('fx')
 export class FxController {
-  constructor(private readonly fxService: FxService) {}
+  constructor(
+    private readonly fxService: FxService,
+    private readonly quoteService: QuoteService,
+  ) {}
 
   @Get('rates')
   @ApiOperation({
@@ -38,5 +48,24 @@ export class FxController {
   })
   async getRates(): Promise<VersionedRates> {
     return this.fxService.getRates();
+  }
+
+  @Post('quotes')
+  @ApiOperation({
+    summary: 'Request a binding FX quote',
+    description:
+      'Returns a quote id, bid/ask, effective rate, and expiry. Pass the quote id to /wallet/trade to execute at the locked rate within the TTL.',
+  })
+  async createQuote(
+    @Req() req: AuthedRequest,
+    @Body() dto: CreateQuoteDto,
+  ): Promise<Quote> {
+    const userId = req.user!.id;
+    return this.quoteService.createQuote({
+      userId,
+      fromCurrency: dto.fromCurrency,
+      toCurrency: dto.toCurrency,
+      amountInSubunits: BigInt(dto.amountInSubunits),
+    });
   }
 }
