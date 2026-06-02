@@ -9,9 +9,9 @@ import {
   Unique,
   Check,
 } from 'typeorm';
-import { TransactionPurpose } from '../enums/transaction-purpose.enum.js';
-import { TransactionStatus } from '../enums/transaction-status.enum.js';
-import { TransactionLog } from './transaction-log.entity.js';
+import { TransactionPurpose } from '../enums/transaction-purpose.enum';
+import { TransactionStatus } from '../enums/transaction-status.enum';
+import { TransactionLog } from './transaction-log.entity';
 
 @Entity('journal_entries')
 @Unique(['userId', 'idempotencyKey'])

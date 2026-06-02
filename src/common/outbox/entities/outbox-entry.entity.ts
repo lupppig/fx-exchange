@@ -31,10 +31,10 @@ export class OutboxEntry {
   @Column({ default: 0 })
   retryCount!: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   lastError!: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   publishedAt!: Date | null;
 
   @CreateDateColumn()

@@ -6,7 +6,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Balance } from './balance.entity.js';
+import { Balance } from './balance.entity';
 
 @Entity('wallets')
 export class Wallet {

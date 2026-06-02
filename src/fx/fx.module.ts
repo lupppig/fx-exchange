@@ -3,9 +3,9 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { FxService } from './fx.service.js';
-import { FxController } from './fx.controller.js';
-import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
+import { FxService } from './fx.service';
+import { FxController } from './fx.controller';
+import { AuthMiddleware } from '../auth/middleware/auth.middleware';
 
 @Module({
   imports: [

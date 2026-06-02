@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryRunner, Repository } from 'typeorm';
-import { JournalEntry } from './entities/journal-entry.entity.js';
-import { TransactionLog } from './entities/transaction-log.entity.js';
-import { TransactionType } from './enums/transaction-type.enum.js';
-import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
-import { TransactionStatus } from './enums/transaction-status.enum.js';
-import { OutboxService } from '../common/outbox/outbox.service.js';
+import { JournalEntry } from './entities/journal-entry.entity';
+import { TransactionLog } from './entities/transaction-log.entity';
+import { TransactionType } from './enums/transaction-type.enum';
+import { TransactionPurpose } from './enums/transaction-purpose.enum';
+import { TransactionStatus } from './enums/transaction-status.enum';
+import { OutboxService } from '../common/outbox/outbox.service';
 
 export interface LedgerEntryInput {
   walletId: string;

@@ -7,12 +7,12 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
-import { WalletService } from './wallet.service.js';
-import { FundWalletDto } from './dto/fund-wallet.dto.js';
-import { ConvertDto } from './dto/convert.dto.js';
-import { TradeDto } from './dto/trade.dto.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
-import { IdempotencyKey } from '../common/pipes/parse-idempotency-key.pipe.js';
+import { WalletService } from './wallet.service';
+import { FundWalletDto } from './dto/fund-wallet.dto';
+import { ConvertDto } from './dto/convert.dto';
+import { TradeDto } from './dto/trade.dto';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { IdempotencyKey } from '../common/pipes/parse-idempotency-key.pipe';
 
 @ApiTags('Wallet')
 @ApiBearerAuth()

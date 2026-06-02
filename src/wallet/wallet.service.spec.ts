@@ -7,14 +7,14 @@ import {
   SelectQueryBuilder,
 } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { WalletService } from './wallet.service.js';
-import { Wallet } from './entities/wallet.entity.js';
-import { Balance } from './entities/balance.entity.js';
-import { TransactionStatus } from '../transactions/enums/transaction-status.enum.js';
-import { TransactionType } from '../transactions/enums/transaction-type.enum.js';
-import { FxService } from '../fx/fx.service.js';
-import { TransactionsService } from '../transactions/transactions.service.js';
-import { LockService } from '../common/lock/lock.service.js';
+import { WalletService } from './wallet.service';
+import { Wallet } from './entities/wallet.entity';
+import { Balance } from './entities/balance.entity';
+import { TransactionStatus } from '../transactions/enums/transaction-status.enum';
+import { TransactionType } from '../transactions/enums/transaction-type.enum';
+import { FxService } from '../fx/fx.service';
+import { TransactionsService } from '../transactions/transactions.service';
+import { LockService } from '../common/lock/lock.service';
 
 describe('WalletService', () => {
   let service: WalletService;

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryRunner, Repository } from 'typeorm';
-import { OutboxEntry, OutboxStatus } from './entities/outbox-entry.entity.js';
+import { OutboxEntry, OutboxStatus } from './entities/outbox-entry.entity';
 
 @Injectable()
 export class OutboxService {

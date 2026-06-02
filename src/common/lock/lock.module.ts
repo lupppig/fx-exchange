@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { LockService } from './lock.service.js';
+import { LockService } from './lock.service';
 
 @Global()
 @Module({

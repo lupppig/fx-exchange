@@ -6,19 +6,17 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { WinstonModule, utilities as nestWinstonUtilities } from 'nest-winston';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { BullModule } from '@nestjs/bullmq';
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
 import * as winston from 'winston';
-import { envValidationSchema } from './config/env.validation.js';
-import { HealthModule } from './health/health.module.js';
-import { UsersModule } from './users/users.module.js';
-import { AuthModule } from './auth/auth.module.js';
-import { WalletModule } from './wallet/wallet.module.js';
-import { FxModule } from './fx/fx.module.js';
-import { TransactionsModule } from './transactions/transactions.module.js';
-import { LockModule } from './common/lock/lock.module.js';
-import { OutboxModule } from './common/outbox/outbox.module.js';
-import { LoggingModule } from './common/logging/logging.module.js';
-import { User } from './users/user.entity.js';
+import { envValidationSchema } from './config/env.validation';
+import { HealthModule } from './health/health.module';
+import { UsersModule } from './users/users.module';
+import { AuthModule } from './auth/auth.module';
+import { WalletModule } from './wallet/wallet.module';
+import { FxModule } from './fx/fx.module';
+import { TransactionsModule } from './transactions/transactions.module';
+import { LockModule } from './common/lock/lock.module';
+import { OutboxModule } from './common/outbox/outbox.module';
+import { User } from './users/user.entity';
 
 @Module({
   imports: [
@@ -34,7 +32,7 @@ import { User } from './users/user.entity.js';
         autoLoadEntities: true,
         synchronize: false,
         migrationsRun: true,
-        migrations: ['src/migrations/*.ts'],
+        migrations: [__dirname + '/migrations/*.{js,ts}'],
         entities: [User],
         ssl: configService.get<string>('DATABASE_URL')?.includes('neon.tech')
           ? { rejectUnauthorized: false }
@@ -55,22 +53,6 @@ import { User } from './users/user.entity.js';
           limit: config.get<number>('RATE_LIMIT_LIMIT', 10),
         },
       ],
-    }),
-    RabbitMQModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        exchanges: [
-          {
-            name: 'fx_exchange_events',
-            type: 'topic',
-            options: { durable: true },
-          },
-        ],
-        uri: config.get<string>('RABBITMQ_URL', 'amqp://localhost'),
-        connectionInitOptions: { wait: false },
-        enableControllerDiscovery: false,
-      }),
     }),
     BullModule.forRootAsync({
       imports: [ConfigModule],

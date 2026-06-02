@@ -9,9 +9,9 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Expose, Exclude } from 'class-transformer';
-import { TransactionType } from '../enums/transaction-type.enum.js';
-import { JournalEntry } from './journal-entry.entity.js';
-import { getSubunitFactor } from '../../wallet/utils/currency.util.js';
+import { TransactionType } from '../enums/transaction-type.enum';
+import { JournalEntry } from './journal-entry.entity';
+import { getSubunitFactor } from '../../wallet/utils/currency.util';
 
 @Entity('transaction_logs')
 @Check(`"amount" > 0`)

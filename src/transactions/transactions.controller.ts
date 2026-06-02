@@ -5,9 +5,9 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { TransactionsService } from './transactions.service.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
-import { GetTransactionsDto } from '../wallet/dto/get-transactions.dto.js';
+import { TransactionsService } from './transactions.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { GetTransactionsDto } from '../wallet/dto/get-transactions.dto';
 
 @ApiTags('Transactions')
 @ApiBearerAuth()

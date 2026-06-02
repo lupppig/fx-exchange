@@ -7,8 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
-import { OutboxService } from './outbox.service.js';
-import { OutboxEntry } from './entities/outbox-entry.entity.js';
+import { OutboxService } from './outbox.service';
+import { OutboxEntry } from './entities/outbox-entry.entity';
 
 @Injectable()
 export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {

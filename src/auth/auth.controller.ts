@@ -1,10 +1,10 @@
 import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { AuthService } from './auth.service.js';
-import { RegisterDto } from './dto/register.dto.js';
-import { VerifyOtpDto } from './dto/verify-otp.dto.js';
-import { SigninDto } from './dto/signin.dto.js';
+import { AuthService } from './auth.service';
+import { RegisterDto } from './dto/register.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { SigninDto } from './dto/signin.dto';
 
 @ApiTags('Auth')
 @Controller('auth')

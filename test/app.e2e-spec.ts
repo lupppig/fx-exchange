@@ -3,11 +3,11 @@ import { INestApplication, ValidationPipe, VersioningType, Reflector } from '@ne
 import { ClassSerializerInterceptor } from '@nestjs/common';
 import * as request from 'supertest';
 import { DataSource } from 'typeorm';
-import { AppModule } from '../src/app.module.js';
-import { MailService } from '../src/common/mail/mail.service.js';
-import { FxService } from '../src/fx/fx.service.js';
-import { TransactionStatus } from '../src/transactions/enums/transaction-status.enum.js';
-import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor.js';
+import { AppModule } from '../src/app.module';
+import { MailService } from '../src/common/mail/mail.service';
+import { FxService } from '../src/fx/fx.service';
+import { TransactionStatus } from '../src/transactions/enums/transaction-status.enum';
+import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('Application E2E (Comprehensive Flow)', () => {

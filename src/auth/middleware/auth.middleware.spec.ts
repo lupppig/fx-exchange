@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { AuthMiddleware } from './auth.middleware.js';
+import { AuthMiddleware } from './auth.middleware';
 import { Request, Response, NextFunction } from 'express';
 
 describe('AuthMiddleware', () => {

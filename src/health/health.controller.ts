@@ -3,7 +3,7 @@ import { HealthCheckService, TypeOrmHealthIndicator } from '@nestjs/terminus';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { Redis } from 'ioredis';
 import { ApiTags, ApiOperation, ApiOkResponse, ApiInternalServerErrorResponse } from '@nestjs/swagger';
-import { HealthCheckResponseDto, ErrorResponseDto } from '../common/dto/api-response.dto.js';
+import { HealthCheckResponseDto, ErrorResponseDto } from '../common/dto/api-response.dto';
 
 @ApiTags('Health')
 @Controller('health')

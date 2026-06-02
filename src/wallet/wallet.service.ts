@@ -4,18 +4,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 import { DataSource, Repository } from 'typeorm';
-import { Wallet } from './entities/wallet.entity.js';
-import { Balance } from './entities/balance.entity.js';
-import { TransactionType } from '../transactions/enums/transaction-type.enum.js';
-import { TransactionPurpose } from '../transactions/enums/transaction-purpose.enum.js';
-import { TransactionStatus } from '../transactions/enums/transaction-status.enum.js';
-import { FxService } from '../fx/fx.service.js';
-import { getSubunitFactor } from './utils/currency.util.js';
-import { isSupportedCurrency } from '../common/constants/supported-currencies.js';
-import { JournalEntry } from '../transactions/entities/journal-entry.entity.js';
-import { TransactionsService } from '../transactions/transactions.service.js';
-import { LockService } from '../common/lock/lock.service.js';
-import { WalletResponseDto } from './dto/wallet-response.dto.js';
+import { Wallet } from './entities/wallet.entity';
+import { Balance } from './entities/balance.entity';
+import { TransactionType } from '../transactions/enums/transaction-type.enum';
+import { TransactionPurpose } from '../transactions/enums/transaction-purpose.enum';
+import { TransactionStatus } from '../transactions/enums/transaction-status.enum';
+import { FxService } from '../fx/fx.service';
+import { getSubunitFactor } from './utils/currency.util';
+import { isSupportedCurrency } from '../common/constants/supported-currencies';
+import { JournalEntry } from '../transactions/entities/journal-entry.entity';
+import { TransactionsService } from '../transactions/transactions.service';
+import { LockService } from '../common/lock/lock.service';
+import { WalletResponseDto } from './dto/wallet-response.dto';
 
 @Injectable()
 export class WalletService {

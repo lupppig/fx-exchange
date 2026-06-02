@@ -1,5 +1,5 @@
 import { Expose, Type } from 'class-transformer';
-import { Balance } from '../entities/balance.entity.js';
+import { Balance } from '../entities/balance.entity';
 
 export class WalletResponseDto {
   @Expose()

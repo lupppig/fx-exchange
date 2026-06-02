@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { FxService, VersionedRates } from './fx.service.js';
+import { FxService, VersionedRates } from './fx.service';
 
 @ApiTags('FX Rates')
 @ApiBearerAuth()

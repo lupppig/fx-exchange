@@ -1,9 +1,9 @@
 import { IsOptional, IsInt, Min, Max, IsISO8601, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsSupportedCurrency } from '../../common/constants/supported-currencies.js';
-import { TransactionType } from '../../transactions/enums/transaction-type.enum.js';
-import { TransactionPurpose } from '../../transactions/enums/transaction-purpose.enum.js';
+import { IsSupportedCurrency } from '../../common/constants/supported-currencies';
+import { TransactionType } from '../../transactions/enums/transaction-type.enum';
+import { TransactionPurpose } from '../../transactions/enums/transaction-purpose.enum';
 
 export class GetTransactionsDto {
   @ApiPropertyOptional({
