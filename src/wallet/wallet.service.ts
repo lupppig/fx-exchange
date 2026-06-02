@@ -6,6 +6,8 @@ import Redis from 'ioredis';
 import { DataSource, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import { Balance } from './entities/balance.entity';
+import { Order, OrderStatus, OrderType } from './entities/order.entity';
+import { QuoteService } from '../fx/quote.service';
 import { TransactionType } from '../transactions/enums/transaction-type.enum';
 import { TransactionPurpose } from '../transactions/enums/transaction-purpose.enum';
 import { TransactionStatus } from '../transactions/enums/transaction-status.enum';
@@ -25,11 +27,14 @@ export class WalletService {
   constructor(
     @InjectRepository(Wallet)
     private readonly walletRepository: Repository<Wallet>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly transactionsService: TransactionsService,
     private readonly lockService: LockService,
     private readonly dataSource: DataSource,
     private readonly fxService: FxService,
     private readonly houseAccount: HouseAccountService,
+    private readonly quoteService: QuoteService,
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
@@ -509,5 +514,268 @@ export class WalletService {
       idempotencyKey,
       'trade',
     );
+  }
+
+  /**
+   * Execute a trade against a previously-issued quote.
+   *
+   * Differences from convertFunds:
+   *   - rate / amountOut are LOCKED in the quote; no FX call inside the
+   *     trade path. This is the only way to give the user a real binding
+   *     price.
+   *   - quote is single-use (Redis GETDEL); once consumed it cannot be
+   *     replayed even within its TTL.
+   *   - persists an Order row that records the lifecycle and links the
+   *     quote to the journal entry.
+   *
+   * Concurrency model:
+   *   - per-user Redlock around the whole operation
+   *   - SELECT ... FOR UPDATE on both user balances and both house balances
+   *     under one DB transaction, with house rows locked after the user's
+   *     to keep a consistent global lock order
+   *
+   * Idempotency:
+   *   - same (userId, idempotencyKey) as the rest of the API.
+   *   - if a journal entry already exists for the key we return the
+   *     original result. The quote consumption is best-effort (the original
+   *     trade already burned the quote on its first run).
+   */
+  async executeTrade(userId: string, quoteId: string, idempotencyKey: string) {
+    // Replay protection first -- if we've already booked this idempotency
+    // key, return the existing result without touching the quote.
+    const existing = await this.transactionsService.findByIdempotencyKey(
+      userId,
+      idempotencyKey,
+    );
+    if (existing) {
+      if (existing.status === TransactionStatus.SUCCESS) {
+        return {
+          message: 'Trade executed (idempotent)',
+          status: TransactionStatus.SUCCESS,
+          journal: existing,
+        };
+      }
+      if (existing.status === TransactionStatus.PENDING) {
+        throw new BadRequestException(
+          'Trade is currently being processed. Please wait.',
+        );
+      }
+      throw new BadRequestException(
+        'Trade previously failed. Please request a new quote and use a new idempotency key.',
+      );
+    }
+
+    const quote = await this.quoteService.consumeQuote(quoteId, userId);
+    if (!quote) {
+      throw new BadRequestException(
+        'Quote expired, already used, or does not belong to this user',
+      );
+    }
+
+    const amountIn = BigInt(quote.amountInSubunits);
+    const amountOut = BigInt(quote.amountOutSubunits);
+    const { fromCurrency, toCurrency } = quote;
+
+    return this.lockService.acquire(`wallet:${userId}`, async () => {
+      let wallet = await this.walletRepository.findOne({ where: { userId } });
+      if (!wallet) {
+        wallet = this.walletRepository.create({ userId });
+        wallet = await this.walletRepository.save(wallet);
+      }
+
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        // Lock user balances (from then to), then house balances. Consistent
+        // ordering avoids deadlocks with funding and convert flows.
+        const fromBalance = await queryRunner.manager
+          .createQueryBuilder(Balance, 'balance')
+          .setLock('pessimistic_write')
+          .where(
+            'balance.walletId = :walletId AND balance.currency = :currency',
+            { walletId: wallet.id, currency: fromCurrency },
+          )
+          .getOne();
+
+        if (!fromBalance || BigInt(fromBalance.amount) < amountIn) {
+          throw new BadRequestException(`Insufficient ${fromCurrency} balance`);
+        }
+
+        let toBalance = await queryRunner.manager
+          .createQueryBuilder(Balance, 'balance')
+          .setLock('pessimistic_write')
+          .where(
+            'balance.walletId = :walletId AND balance.currency = :currency',
+            { walletId: wallet.id, currency: toCurrency },
+          )
+          .getOne();
+        if (!toBalance) {
+          toBalance = queryRunner.manager.create(Balance, {
+            walletId: wallet.id,
+            currency: toCurrency,
+            amount: 0,
+          });
+          toBalance = await queryRunner.manager.save(toBalance);
+        }
+
+        const houseFrom = await this.houseAccount.lockBalance(
+          queryRunner,
+          fromCurrency,
+        );
+        const houseTo = await this.houseAccount.lockBalance(
+          queryRunner,
+          toCurrency,
+        );
+
+        const fromBefore = BigInt(fromBalance.amount);
+        const fromAfter = fromBefore - amountIn;
+        const toBefore = BigInt(toBalance.amount);
+        const toAfter = toBefore + amountOut;
+        const houseFromBefore = BigInt(houseFrom.amount);
+        const houseFromAfter = houseFromBefore + amountIn;
+        const houseToBefore = BigInt(houseTo.amount);
+        const houseToAfter = houseToBefore - amountOut;
+        if (houseToAfter < 0n) {
+          throw new BadRequestException(
+            `House liquidity exhausted for ${toCurrency}`,
+          );
+        }
+
+        // Insert the order row FIRST so it has an id we can reference from
+        // the journal. Status starts PENDING and flips to FILLED on commit.
+        const order = queryRunner.manager.create(Order, {
+          userId,
+          fromCurrency,
+          toCurrency,
+          amountInSubunits: amountIn.toString(),
+          amountOutSubunits: amountOut.toString(),
+          type: OrderType.MARKET,
+          status: OrderStatus.PENDING,
+          quoteId: quote.id,
+          executedRate: quote.effectiveRate,
+        });
+        const savedOrder = await queryRunner.manager.save(order);
+
+        const journal = await this.transactionsService.recordJournalEntry(
+          {
+            walletId: wallet.id,
+            userId,
+            purpose: TransactionPurpose.TRADE,
+            idempotencyKey,
+            exchangeRate: Number(quote.effectiveRate),
+            status: TransactionStatus.SUCCESS,
+            entries: [
+              {
+                walletId: wallet.id,
+                userId,
+                type: TransactionType.DEBIT,
+                currency: fromCurrency,
+                amount: Number(amountIn),
+                balanceBefore: Number(fromBefore),
+                balanceAfter: Number(fromAfter),
+              },
+              {
+                walletId: houseFrom.walletId,
+                userId: HOUSE_USER_ID,
+                type: TransactionType.CREDIT,
+                currency: fromCurrency,
+                amount: Number(amountIn),
+                balanceBefore: Number(houseFromBefore),
+                balanceAfter: Number(houseFromAfter),
+              },
+              {
+                walletId: houseTo.walletId,
+                userId: HOUSE_USER_ID,
+                type: TransactionType.DEBIT,
+                currency: toCurrency,
+                amount: Number(amountOut),
+                balanceBefore: Number(houseToBefore),
+                balanceAfter: Number(houseToAfter),
+              },
+              {
+                walletId: wallet.id,
+                userId,
+                type: TransactionType.CREDIT,
+                currency: toCurrency,
+                amount: Number(amountOut),
+                balanceBefore: Number(toBefore),
+                balanceAfter: Number(toAfter),
+              },
+            ],
+          },
+          queryRunner,
+        );
+
+        await queryRunner.manager.update(Balance, fromBalance.id, {
+          amount: Number(fromAfter),
+        });
+        await queryRunner.manager.update(Balance, toBalance.id, {
+          amount: Number(toAfter),
+        });
+        await queryRunner.manager.update(Balance, houseFrom.id, {
+          amount: Number(houseFromAfter),
+        });
+        await queryRunner.manager.update(Balance, houseTo.id, {
+          amount: Number(houseToAfter),
+        });
+
+        await queryRunner.manager.update(Order, savedOrder.id, {
+          status: OrderStatus.FILLED,
+          journalEntryId: journal.id,
+          filledAt: new Date(),
+        });
+
+        await queryRunner.commitTransaction();
+        await this.redis.del(`wallet:balances:${userId}`).catch(() => {});
+
+        this.logger.log({
+          message: 'Trade filled',
+          orderId: savedOrder.id,
+          userId,
+          fromCurrency,
+          toCurrency,
+          amountIn: amountIn.toString(),
+          amountOut: amountOut.toString(),
+          executedRate: quote.effectiveRate,
+          quoteId: quote.id,
+          journalId: journal.id,
+        });
+
+        return {
+          message: 'Trade executed successfully',
+          status: TransactionStatus.SUCCESS,
+          orderId: savedOrder.id,
+          executedRate: quote.effectiveRate,
+          amountInSubunits: amountIn.toString(),
+          amountOutSubunits: amountOut.toString(),
+          journal,
+        };
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        // Best-effort rejected-order audit row outside the failed tx so it
+        // survives even when the main transaction rolled back.
+        await this.orderRepository
+          .save({
+            userId,
+            fromCurrency,
+            toCurrency,
+            amountInSubunits: amountIn.toString(),
+            amountOutSubunits: amountOut.toString(),
+            type: OrderType.MARKET,
+            status: OrderStatus.REJECTED,
+            quoteId: quote.id,
+            executedRate: quote.effectiveRate,
+            rejectionReason:
+              error instanceof Error ? error.message : String(error),
+          } as Partial<Order>)
+          .catch(() => {});
+        if (error instanceof BadRequestException) throw error;
+        throw new BadRequestException('Failed to execute trade');
+      } finally {
+        await queryRunner.release();
+      }
+    });
   }
 }

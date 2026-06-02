@@ -7,13 +7,14 @@ import { WalletController } from './wallet.controller';
 import { HouseAccountService } from './house-account.service';
 import { Wallet } from './entities/wallet.entity';
 import { Balance } from './entities/balance.entity';
+import { Order } from './entities/order.entity';
 import { AuthMiddleware } from '../auth/middleware/auth.middleware';
 import { FxModule } from '../fx/fx.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Wallet, Balance]),
+    TypeOrmModule.forFeature([Wallet, Balance, Order]),
     FxModule,
     TransactionsModule,
     JwtModule.registerAsync({

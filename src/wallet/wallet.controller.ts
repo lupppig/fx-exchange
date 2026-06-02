@@ -10,7 +10,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader } from '@n
 import { WalletService } from './wallet.service';
 import { FundWalletDto } from './dto/fund-wallet.dto';
 import { ConvertDto } from './dto/convert.dto';
-import { TradeDto } from './dto/trade.dto';
+import { ExecuteTradeDto } from './dto/execute-trade.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { IdempotencyKey } from '../common/pipes/parse-idempotency-key.pipe';
 
@@ -128,63 +128,19 @@ export class WalletController {
   @Post('trade')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Trade currency',
-    description: 'Trade Naira ↔ other currency using real-time FX rates. Amount in smallest unit.',
+    summary: 'Execute a previously-issued FX quote',
+    description:
+      'Trades at the rate locked in the quote. The quote must belong to the caller, not be expired, and not have been used.',
   })
-  @ApiHeader({
-    name: 'x-idempotency-key',
-    description: 'Unique key to prevent duplicate trades',
-    required: true,
-  })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Trade executed successfully.',
-    schema: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', example: 'Conversion successful' },
-        status: { type: 'string', example: 'SUCCESS' },
-        rateVersion: { type: 'string' },
-        exchangeRate: { type: 'number' },
-        debit: { type: 'object' },
-        credit: { type: 'object' },
-      },
-    },
-  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Trade executed successfully.' })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Insufficient balance, invalid currency pair, or amount too small.',
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', example: false },
-        statusCode: { type: 'number', example: 400 },
-        message: { type: 'string', example: 'Insufficient USD balance' },
-        error: { type: 'string', example: 'INSUFFICIENT_BALANCE' },
-        details: {
-          type: 'object',
-          properties: {
-            currency: { type: 'string', example: 'USD' },
-            available: { type: 'number', example: 100000 },
-            requested: { type: 'number', example: 200000 },
-            shortfall: { type: 'number', example: 100000 },
-          },
-        },
-      },
-    },
+    description: 'Quote expired/unknown/already used, insufficient balance, or rejected.',
   })
   async trade(
     @CurrentUser('sub') userId: string,
-    @IdempotencyKey() idempotencyKey: string,
-    @Body() dto: TradeDto,
+    @Body() dto: ExecuteTradeDto,
   ) {
-    return this.walletService.tradeFunds(
-      userId,
-      dto.fromCurrency,
-      dto.toCurrency,
-      dto.amount,
-      idempotencyKey,
-    );
+    return this.walletService.executeTrade(userId, dto.quoteId, dto.idempotencyKey);
   }
-
 }

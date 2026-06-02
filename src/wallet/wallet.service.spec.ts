@@ -10,6 +10,8 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { WalletService } from './wallet.service';
 import { Wallet } from './entities/wallet.entity';
 import { Balance } from './entities/balance.entity';
+import { Order } from './entities/order.entity';
+import { QuoteService } from '../fx/quote.service';
 import { TransactionStatus } from '../transactions/enums/transaction-status.enum';
 import { TransactionType } from '../transactions/enums/transaction-type.enum';
 import { FxService } from '../fx/fx.service';
@@ -65,6 +67,21 @@ describe('WalletService', () => {
             findOne: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(Order),
+          useValue: {
+            create: jest.fn(),
+            save: jest.fn(),
+            update: jest.fn(),
+          },
+        },
+        {
+          provide: QuoteService,
+          useValue: {
+            createQuote: jest.fn(),
+            consumeQuote: jest.fn(),
           },
         },
         {
