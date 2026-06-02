@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { WalletService } from './wallet.service';
 import { WalletController } from './wallet.controller';
+import { HouseAccountService } from './house-account.service';
 import { Wallet } from './entities/wallet.entity';
 import { Balance } from './entities/balance.entity';
 import { AuthMiddleware } from '../auth/middleware/auth.middleware';
@@ -24,8 +25,8 @@ import { TransactionsModule } from '../transactions/transactions.module';
     }),
   ],
   controllers: [WalletController],
-  providers: [WalletService],
-  exports: [WalletService],
+  providers: [WalletService, HouseAccountService],
+  exports: [WalletService, HouseAccountService],
 })
 export class WalletModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

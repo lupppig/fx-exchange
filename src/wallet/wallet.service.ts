@@ -16,6 +16,7 @@ import { JournalEntry } from '../transactions/entities/journal-entry.entity';
 import { TransactionsService } from '../transactions/transactions.service';
 import { LockService } from '../common/lock/lock.service';
 import { WalletResponseDto } from './dto/wallet-response.dto';
+import { HouseAccountService, HOUSE_USER_ID } from './house-account.service';
 
 @Injectable()
 export class WalletService {
@@ -28,6 +29,7 @@ export class WalletService {
     private readonly lockService: LockService,
     private readonly dataSource: DataSource,
     private readonly fxService: FxService,
+    private readonly houseAccount: HouseAccountService,
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
@@ -169,9 +171,24 @@ export class WalletService {
           balance = await queryRunner.manager.save(balance);
         }
 
-        const balanceAfter = Number(balanceBefore) + Number(amount);
+        const balanceAfter = balanceBefore + amount;
 
-        // Create journal entry atomically with balance update
+        // House is the counterparty: it loses the currency it pays out to
+        // the user. Lock the house row second to keep a consistent lock
+        // ordering (user-wallet before house-wallet) across all flows --
+        // this avoids cross-flow deadlocks.
+        const houseBalance = await this.houseAccount.lockBalance(
+          queryRunner,
+          normalizedCurrency,
+        );
+        const houseBefore = Number(houseBalance.amount);
+        const houseAfter = houseBefore - amount;
+        if (houseAfter < 0) {
+          throw new BadRequestException(
+            `House liquidity exhausted for ${normalizedCurrency}`,
+          );
+        }
+
         const journal = await this.transactionsService.recordJournalEntry(
           {
             walletId: wallet.id,
@@ -190,13 +207,13 @@ export class WalletService {
                 balanceAfter,
               },
               {
-                walletId: wallet.id,
-                userId,
+                walletId: houseBalance.walletId,
+                userId: HOUSE_USER_ID,
                 type: TransactionType.DEBIT,
                 currency: normalizedCurrency,
                 amount,
-                balanceBefore: 0,
-                balanceAfter: 0,
+                balanceBefore: houseBefore,
+                balanceAfter: houseAfter,
               },
             ],
           },
@@ -205,6 +222,9 @@ export class WalletService {
 
         await queryRunner.manager.update(Balance, balance.id, {
           amount: balanceAfter,
+        });
+        await queryRunner.manager.update(Balance, houseBalance.id, {
+          amount: houseAfter,
         });
 
         await queryRunner.commitTransaction();
@@ -362,9 +382,30 @@ export class WalletService {
         }
 
         const fromBefore = Number(fromBalance.amount);
-        const fromAfter = Number(fromBefore) - Number(amount);
+        const fromAfter = fromBefore - amount;
         const toBefore = Number(toBalance.amount);
-        const toAfter = Number(toBefore) + Number(convertedAmount);
+        const toAfter = toBefore + convertedAmount;
+
+        // House counterparty legs. Locking order: user-from, user-to,
+        // house-from, house-to. House is always locked after the user to
+        // avoid deadlocks with other concurrent flows.
+        const houseFrom = await this.houseAccount.lockBalance(
+          queryRunner,
+          fromCurrency,
+        );
+        const houseTo = await this.houseAccount.lockBalance(
+          queryRunner,
+          toCurrency,
+        );
+        const houseFromBefore = Number(houseFrom.amount);
+        const houseFromAfter = houseFromBefore + amount; // house takes in `from`
+        const houseToBefore = Number(houseTo.amount);
+        const houseToAfter = houseToBefore - convertedAmount; // house pays out `to`
+        if (houseToAfter < 0) {
+          throw new BadRequestException(
+            `House liquidity exhausted for ${toCurrency}`,
+          );
+        }
 
         const journal = await this.transactionsService.recordJournalEntry(
           {
@@ -385,6 +426,24 @@ export class WalletService {
                 balanceAfter: fromAfter,
               },
               {
+                walletId: houseFrom.walletId,
+                userId: HOUSE_USER_ID,
+                type: TransactionType.CREDIT,
+                currency: fromCurrency,
+                amount,
+                balanceBefore: houseFromBefore,
+                balanceAfter: houseFromAfter,
+              },
+              {
+                walletId: houseTo.walletId,
+                userId: HOUSE_USER_ID,
+                type: TransactionType.DEBIT,
+                currency: toCurrency,
+                amount: convertedAmount,
+                balanceBefore: houseToBefore,
+                balanceAfter: houseToAfter,
+              },
+              {
                 walletId: wallet.id,
                 userId,
                 type: TransactionType.CREDIT,
@@ -403,6 +462,12 @@ export class WalletService {
         });
         await queryRunner.manager.update(Balance, toBalance.id, {
           amount: toAfter,
+        });
+        await queryRunner.manager.update(Balance, houseFrom.id, {
+          amount: houseFromAfter,
+        });
+        await queryRunner.manager.update(Balance, houseTo.id, {
+          amount: houseToAfter,
         });
 
         await queryRunner.commitTransaction();

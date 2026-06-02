@@ -15,6 +15,7 @@ import { TransactionType } from '../transactions/enums/transaction-type.enum';
 import { FxService } from '../fx/fx.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { LockService } from '../common/lock/lock.service';
+import { HouseAccountService } from './house-account.service';
 
 describe('WalletService', () => {
   let service: WalletService;
@@ -99,6 +100,23 @@ describe('WalletService', () => {
           provide: FxService,
           useValue: {
             getRates: jest.fn(),
+          },
+        },
+        {
+          provide: HouseAccountService,
+          useValue: {
+            // Return a fresh, well-funded house balance for whatever
+            // currency the caller asks for. Tests that care about the
+            // house leg override this per-test.
+            getId: jest.fn().mockReturnValue('house-wallet-id'),
+            lockBalance: jest
+              .fn()
+              .mockImplementation((_qr, ccy: string) => ({
+                id: `house-balance-${ccy}`,
+                walletId: 'house-wallet-id',
+                currency: ccy,
+                amount: '9000000000000000',
+              })),
           },
         },
       ],
@@ -232,8 +250,20 @@ describe('WalletService', () => {
           purpose: expect.any(String),
           status: TransactionStatus.SUCCESS,
           entries: expect.arrayContaining([
-            expect.objectContaining({ type: TransactionType.CREDIT }),
-            expect.objectContaining({ type: TransactionType.DEBIT }),
+            expect.objectContaining({
+              type: TransactionType.CREDIT,
+              walletId: mockWalletId,
+              userId: mockUserId,
+              amount: 50000,
+            }),
+            // House counterparty leg: same currency, same amount, debited
+            // from the house wallet -- NOT a zero-amount self-leg.
+            expect.objectContaining({
+              type: TransactionType.DEBIT,
+              walletId: 'house-wallet-id',
+              currency: 'NGN',
+              amount: 50000,
+            }),
           ]),
         }),
         queryRunner,
@@ -314,15 +344,48 @@ describe('WalletService', () => {
       );
 
       expect(result.status).toBe(TransactionStatus.SUCCESS);
-      expect(transactionsService.recordJournalEntry).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entries: expect.arrayContaining([
-            expect.objectContaining({ type: TransactionType.DEBIT }),
-            expect.objectContaining({ type: TransactionType.CREDIT }),
-          ]),
-        }),
-        queryRunner,
+
+      // The conversion ledger must have four legs:
+      //   user DEBIT(from)  + house CREDIT(from)
+      //   house DEBIT(to)   + user CREDIT(to)
+      // Anything less and the books don't balance economically.
+      const call = (transactionsService.recordJournalEntry as jest.Mock).mock
+        .calls[0][0];
+      expect(call.entries).toHaveLength(4);
+
+      const userDebitFrom = call.entries.find(
+        (e: any) =>
+          e.walletId === mockWalletId &&
+          e.type === TransactionType.DEBIT &&
+          e.currency === 'NGN',
       );
+      const houseCreditFrom = call.entries.find(
+        (e: any) =>
+          e.walletId === 'house-wallet-id' &&
+          e.type === TransactionType.CREDIT &&
+          e.currency === 'NGN',
+      );
+      const houseDebitTo = call.entries.find(
+        (e: any) =>
+          e.walletId === 'house-wallet-id' &&
+          e.type === TransactionType.DEBIT &&
+          e.currency === 'USD',
+      );
+      const userCreditTo = call.entries.find(
+        (e: any) =>
+          e.walletId === mockWalletId &&
+          e.type === TransactionType.CREDIT &&
+          e.currency === 'USD',
+      );
+      expect(userDebitFrom).toBeDefined();
+      expect(houseCreditFrom).toBeDefined();
+      expect(houseDebitTo).toBeDefined();
+      expect(userCreditTo).toBeDefined();
+
+      // From-currency legs net to zero, to-currency legs net to zero.
+      expect(userDebitFrom.amount).toBe(houseCreditFrom.amount);
+      expect(houseDebitTo.amount).toBe(userCreditTo.amount);
+
       expect(queryRunner.commitTransaction).toHaveBeenCalled();
     });
   });
