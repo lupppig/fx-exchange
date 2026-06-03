@@ -8,8 +8,13 @@ import {
 } from 'typeorm';
 
 export enum OutboxStatus {
+  /** Newly written, awaiting pickup. */
   PENDING = 'PENDING',
+  /** Claimed by a processor instance; visible to recovery sweep if stale. */
+  PROCESSING = 'PROCESSING',
+  /** Successfully published to the broker. Terminal. */
   PUBLISHED = 'PUBLISHED',
+  /** Retries exhausted -- dead letter. Terminal. */
   FAILED = 'FAILED',
 }
 
@@ -36,6 +41,14 @@ export class OutboxEntry {
 
   @Column({ type: 'timestamp', nullable: true })
   publishedAt!: Date | null;
+
+  /**
+   * Set when a processor flips this row to PROCESSING. The recovery sweep
+   * uses it to detect rows abandoned by a crashed replica (claimedAt older
+   * than the stale threshold) and revert them to PENDING.
+   */
+  @Column({ type: 'timestamp', nullable: true })
+  claimedAt!: Date | null;
 
   @CreateDateColumn()
   createdAt!: Date;
