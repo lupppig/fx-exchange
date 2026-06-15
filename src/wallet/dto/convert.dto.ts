@@ -53,7 +53,8 @@ export class ConvertDto {
 
   @ApiProperty({
     example: 100000,
-    description: 'Amount of fromCurrency in smallest unit (e.g., kobo for NGN, cents for USD)',
+    description:
+      'Amount of fromCurrency in smallest unit (e.g., kobo for NGN, cents for USD)',
     minimum: 1,
   })
   @Type(() => Number)

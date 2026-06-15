@@ -13,7 +13,9 @@ export class Orders1748880001000 implements MigrationInterface {
   name = 'Orders1748880001000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`CREATE TYPE "public"."orders_type_enum" AS ENUM('MARKET')`);
+    await queryRunner.query(
+      `CREATE TYPE "public"."orders_type_enum" AS ENUM('MARKET')`,
+    );
     await queryRunner.query(
       `CREATE TYPE "public"."orders_status_enum" AS ENUM('PENDING', 'FILLED', 'REJECTED')`,
     );
@@ -41,21 +43,39 @@ export class Orders1748880001000 implements MigrationInterface {
       )
     `);
 
-    await queryRunner.query(`CREATE INDEX "IDX_orders_userId" ON "orders" ("userId")`);
-    await queryRunner.query(`CREATE INDEX "IDX_orders_status" ON "orders" ("status")`);
-    await queryRunner.query(`CREATE INDEX "IDX_orders_quoteId" ON "orders" ("quoteId")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_orders_userId" ON "orders" ("userId")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_orders_status" ON "orders" ("status")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_orders_quoteId" ON "orders" ("quoteId")`,
+    );
     await queryRunner.query(
       `CREATE INDEX "IDX_orders_journalEntryId" ON "orders" ("journalEntryId")`,
     );
-    await queryRunner.query(`CREATE INDEX "IDX_orders_createdAt" ON "orders" ("createdAt")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_orders_createdAt" ON "orders" ("createdAt")`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "public"."IDX_orders_createdAt"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "public"."IDX_orders_journalEntryId"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "public"."IDX_orders_quoteId"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "public"."IDX_orders_status"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "public"."IDX_orders_userId"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "public"."IDX_orders_createdAt"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "public"."IDX_orders_journalEntryId"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "public"."IDX_orders_quoteId"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "public"."IDX_orders_status"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "public"."IDX_orders_userId"`,
+    );
     await queryRunner.query(`DROP TABLE "orders"`);
     await queryRunner.query(`DROP TYPE "public"."orders_status_enum"`);
     await queryRunner.query(`DROP TYPE "public"."orders_type_enum"`);

@@ -14,12 +14,12 @@ export class HealthCheckResponseDto {
   @ApiProperty({ example: '2026-03-17T08:54:09.000Z' })
   timestamp!: string;
 
-  @ApiProperty({ 
-    type: Object, 
-    example: { 
+  @ApiProperty({
+    type: Object,
+    example: {
       database: { status: 'up' },
-      redis: { status: 'up' } 
-    } 
+      redis: { status: 'up' },
+    },
   })
   data!: HealthCheckData;
 }

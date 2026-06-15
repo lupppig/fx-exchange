@@ -116,7 +116,9 @@ export function parseRate(value: unknown): Decimal {
   }
   const d = new Decimal(value as Decimal.Value);
   if (!d.isFinite() || d.lte(0)) {
-    throw new Error(`FX rate is not a positive finite number: ${String(value)}`);
+    throw new Error(
+      `FX rate is not a positive finite number: ${String(value)}`,
+    );
   }
   return d;
 }

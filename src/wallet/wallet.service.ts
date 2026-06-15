@@ -38,10 +38,6 @@ export class WalletService {
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
-  /**
-   * Fetches or creates a wallet for a user.
-   * Uses cache-aside pattern for balances.
-   */
   async getWallet(userId: string) {
     const cacheKey = `wallet:balances:${userId}`;
 
@@ -91,11 +87,8 @@ export class WalletService {
   }
 
   /**
-   * Funds a wallet with a specified currency.
-   * Creates a proper double-entry journal:
-   *   CREDIT to user balance
-   *   DEBIT from external funding source
-   * All within a single atomic transaction.
+   * Double-entry: CREDIT user balance, DEBIT the house (funding source),
+   * within a single atomic transaction.
    */
   async fundWallet(
     userId: string,
@@ -142,6 +135,23 @@ export class WalletService {
     }
 
     return this.lockService.acquire(`wallet:${userId}`, async () => {
+      // Re-check idempotency INSIDE the lock. The pre-lock check above races:
+      // two concurrent requests with the same key can both pass it before
+      // either inserts a journal. The lock serializes them, so the second one
+      // to enter must see the first's SUCCESS journal and return it instead of
+      // colliding on the (userId, idempotencyKey) unique constraint.
+      const replay = await this.transactionsService.findByIdempotencyKey(
+        userId,
+        idempotencyKey,
+      );
+      if (replay && replay.status === TransactionStatus.SUCCESS) {
+        return {
+          message: 'Wallet funded successfully (idempotent)',
+          status: TransactionStatus.SUCCESS,
+          journal: plainToInstance(JournalEntry, replay),
+        };
+      }
+
       let wallet = await this.walletRepository.findOne({ where: { userId } });
       if (!wallet) {
         wallet = this.walletRepository.create({ userId });
@@ -251,11 +261,6 @@ export class WalletService {
     });
   }
 
-  /**
-   * Converts funds between two currencies.
-   * Creates a journal entry with a DEBIT + CREDIT ledger entry pair.
-   * All within a single atomic transaction.
-   */
   async convertFunds(
     userId: string,
     from: string,
@@ -496,9 +501,6 @@ export class WalletService {
     });
   }
 
-  /**
-   * Alias for convertFunds with 'trade' context.
-   */
   async tradeFunds(
     userId: string,
     fromCurrency: string,

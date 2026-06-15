@@ -15,7 +15,8 @@ export class CreateQuoteDto {
 
   @ApiProperty({
     example: 1000000,
-    description: 'Amount of fromCurrency in subunits (e.g. 100 NGN = 10000 kobo)',
+    description:
+      'Amount of fromCurrency in subunits (e.g. 100 NGN = 10000 kobo)',
   })
   @IsInt()
   @Min(1)

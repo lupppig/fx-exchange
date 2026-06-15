@@ -53,7 +53,8 @@ export class TradeDto {
 
   @ApiProperty({
     example: 5000,
-    description: 'Amount of fromCurrency in smallest unit (e.g., cents for USD, kobo for NGN)',
+    description:
+      'Amount of fromCurrency in smallest unit (e.g., cents for USD, kobo for NGN)',
     minimum: 1,
   })
   @Type(() => Number)

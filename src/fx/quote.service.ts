@@ -172,9 +172,11 @@ export class QuoteService {
     let raw: string | null = null;
     try {
       // GETDEL is atomic in Redis >= 6.2 -- one round trip, race-free.
-      raw = await (this.redis as unknown as { getdel: (k: string) => Promise<string | null> }).getdel(
-        QUOTE_KEY(quoteId),
-      );
+      raw = await (
+        this.redis as unknown as {
+          getdel: (k: string) => Promise<string | null>;
+        }
+      ).getdel(QUOTE_KEY(quoteId));
     } catch (err) {
       // Some ioredis versions need the command registered. Fallback to
       // the slower but functionally equivalent GET + DEL pair.
@@ -197,7 +199,27 @@ export class QuoteService {
     }
 
     if (parsed.userId !== userId) {
-      // Don't leak which condition failed; treat as not found.
+      // The GETDEL above already removed the quote, but this caller is not its
+      // owner -- consuming here would let an attacker burn another user's quote
+      // just by guessing its id. Re-store it under its remaining TTL so the
+      // rightful owner can still redeem it. Treat the result as "not found" to
+      // avoid leaking which condition failed.
+      const remainingMs = Date.parse(parsed.expiresAt) - Date.now();
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+      if (remainingSeconds > 0) {
+        await this.redis
+          .set(QUOTE_KEY(quoteId), raw, 'EX', remainingSeconds)
+          .catch((err) => {
+            // Best effort: if re-storing fails the owner loses the quote, but
+            // we never want to throw and expose the mismatch as a 500.
+            this.logger.error({
+              message: 'Failed to restore quote after user mismatch',
+              quoteId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+      }
+
       this.logger.warn({
         message: 'Quote consume rejected: user mismatch',
         quoteId,

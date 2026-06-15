@@ -1,8 +1,18 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 const SUPPORTED_CURRENCIES = [
-  'NGN', 'USD', 'EUR', 'GBP', 'CAD', 'AUD',
-  'CHF', 'JPY', 'CNY', 'ZAR', 'KES', 'GHS',
+  'NGN',
+  'USD',
+  'EUR',
+  'GBP',
+  'CAD',
+  'AUD',
+  'CHF',
+  'JPY',
+  'CNY',
+  'ZAR',
+  'KES',
+  'GHS',
 ];
 
 /**
@@ -28,8 +38,12 @@ export class HouseAccount1748880000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // userId must be nullable for the system wallet, and the type wants to be
     // uuid for consistency with users.id (and so FK refs work).
-    await queryRunner.query(`ALTER TABLE "wallets" ALTER COLUMN "userId" DROP NOT NULL`);
-    await queryRunner.query(`ALTER TABLE "wallets" ADD COLUMN "isSystem" boolean NOT NULL DEFAULT false`);
+    await queryRunner.query(
+      `ALTER TABLE "wallets" ALTER COLUMN "userId" DROP NOT NULL`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "wallets" ADD COLUMN "isSystem" boolean NOT NULL DEFAULT false`,
+    );
 
     // One and only one system wallet -- enforce by partial unique index.
     await queryRunner.query(
@@ -59,8 +73,12 @@ export class HouseAccount1748880000000 implements MigrationInterface {
       `DELETE FROM "balances" WHERE "walletId" IN (SELECT "id" FROM "wallets" WHERE "isSystem" = true)`,
     );
     await queryRunner.query(`DELETE FROM "wallets" WHERE "isSystem" = true`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "UQ_wallets_system_singleton"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "UQ_wallets_system_singleton"`,
+    );
     await queryRunner.query(`ALTER TABLE "wallets" DROP COLUMN "isSystem"`);
-    await queryRunner.query(`ALTER TABLE "wallets" ALTER COLUMN "userId" SET NOT NULL`);
+    await queryRunner.query(
+      `ALTER TABLE "wallets" ALTER COLUMN "userId" SET NOT NULL`,
+    );
   }
 }

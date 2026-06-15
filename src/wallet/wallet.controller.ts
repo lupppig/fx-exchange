@@ -6,7 +6,13 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiHeader,
+} from '@nestjs/swagger';
 import { WalletService } from './wallet.service';
 import { FundWalletDto } from './dto/fund-wallet.dto';
 import { ConvertDto } from './dto/convert.dto';
@@ -24,9 +30,13 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get wallet balances',
-    description: 'Returns the authenticated user wallet with all currency balances.',
+    description:
+      'Returns the authenticated user wallet with all currency balances.',
   })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Wallet retrieved successfully.' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Wallet retrieved successfully.',
+  })
   async getWallet(@CurrentUser('sub') userId: string) {
     return this.walletService.getWallet(userId);
   }
@@ -35,15 +45,16 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Fund wallet',
-    description: 'Credits the wallet with the specified currency and amount (in smallest unit, e.g., kobo). Requires an idempotency key header.',
+    description:
+      'Credits the wallet with the specified currency and amount (in smallest unit, e.g., kobo). Requires an idempotency key header.',
   })
   @ApiHeader({
     name: 'x-idempotency-key',
     description: 'Unique key to prevent duplicate transactions',
     required: true,
   })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
+  @ApiResponse({
+    status: HttpStatus.OK,
     description: 'Wallet funded successfully.',
     schema: {
       type: 'object',
@@ -54,28 +65,37 @@ export class WalletController {
       },
     },
   })
-  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid request or funding failure.' })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid request or funding failure.',
+  })
   async fundWallet(
     @CurrentUser('sub') userId: string,
     @IdempotencyKey() idempotencyKey: string,
     @Body() dto: FundWalletDto,
   ) {
-    return this.walletService.fundWallet(userId, dto.currency, dto.amount, idempotencyKey);
+    return this.walletService.fundWallet(
+      userId,
+      dto.currency,
+      dto.amount,
+      idempotencyKey,
+    );
   }
 
   @Post('convert')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Convert currency',
-    description: 'Converts funds from one currency to another using real-time FX rates. Amount in smallest unit.',
+    description:
+      'Converts funds from one currency to another using real-time FX rates. Amount in smallest unit.',
   })
   @ApiHeader({
     name: 'x-idempotency-key',
     description: 'Unique key to prevent duplicate conversions',
     required: true,
   })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
+  @ApiResponse({
+    status: HttpStatus.OK,
     description: 'Currency converted successfully.',
     schema: {
       type: 'object',
@@ -91,7 +111,8 @@ export class WalletController {
   })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Insufficient balance, invalid currency pair, or amount too small.',
+    description:
+      'Insufficient balance, invalid currency pair, or amount too small.',
     schema: {
       type: 'object',
       properties: {
@@ -132,15 +153,23 @@ export class WalletController {
     description:
       'Trades at the rate locked in the quote. The quote must belong to the caller, not be expired, and not have been used.',
   })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Trade executed successfully.' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Trade executed successfully.',
+  })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Quote expired/unknown/already used, insufficient balance, or rejected.',
+    description:
+      'Quote expired/unknown/already used, insufficient balance, or rejected.',
   })
   async trade(
     @CurrentUser('sub') userId: string,
     @Body() dto: ExecuteTradeDto,
   ) {
-    return this.walletService.executeTrade(userId, dto.quoteId, dto.idempotencyKey);
+    return this.walletService.executeTrade(
+      userId,
+      dto.quoteId,
+      dto.idempotencyKey,
+    );
   }
 }

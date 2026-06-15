@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryRunner, Repository } from 'typeorm';
+import { In, QueryRunner, Repository } from 'typeorm';
 import { JournalEntry } from './entities/journal-entry.entity';
 import { TransactionLog } from './entities/transaction-log.entity';
 import { TransactionType } from './enums/transaction-type.enum';
@@ -36,11 +36,6 @@ export class TransactionsService {
     private readonly outboxService: OutboxService,
   ) {}
 
-  /**
-   * Records a journal entry with its linked ledger entries synchronously
-   * within the provided QueryRunner's transaction.
-   * Returns the persisted journal entry.
-   */
   async recordJournalEntry(
     options: RecordJournalOptions,
     queryRunner: QueryRunner,
@@ -98,10 +93,6 @@ export class TransactionsService {
     return saved;
   }
 
-  /**
-   * Updates the status of a journal entry and its ledger entries
-   * synchronously within the provided QueryRunner's transaction.
-   */
   async updateJournalStatus(
     journalId: string,
     status: TransactionStatus,
@@ -124,9 +115,6 @@ export class TransactionsService {
     }
   }
 
-  /**
-   * Finds a journal entry by its idempotency key (synchronous DB read).
-   */
   async findByIdempotencyKey(
     userId: string,
     key: string,
@@ -139,7 +127,17 @@ export class TransactionsService {
 
   /**
    * Fetches transaction history for a user with cursor-based pagination and filtering.
-   * Queries journal entries with their linked ledger entries.
+   *
+   * Pagination is a strict keyset over (createdAt DESC, id DESC). The id
+   * tiebreak is what makes the cursor robust: `createdAt` is a Postgres
+   * timestamp(6) (microseconds) but a JS Date / ISO string only carries
+   * milliseconds, so two journals can compare equal on createdAt. Without the
+   * id tiebreak a boundary row gets silently skipped between pages.
+   *
+   * The `currency`/`type` filters select on the leg table via EXISTS rather
+   * than a JOIN, so the journal's COMPLETE set of legs still hydrates (entries
+   * are eager) -- a leg-level JOIN filter would truncate the entries array and
+   * break double-entry consumers downstream.
    */
   async getTransactions(
     userId: string,
@@ -153,43 +151,110 @@ export class TransactionsService {
   ) {
     const { cursor, limit = 20, currency, type, purpose } = query;
 
-    const qb = this.journalRepo
+    // Validate/decode the cursor up front so a malformed cursor fails fast
+    // (BadRequestException) before we touch the database.
+    const decodedCursor = cursor ? this.decodeCursor(cursor) : null;
+
+    // Step 1: keyset page of journal IDs.
+    //
+    // We project `createdAt` through to_char at microsecond precision and use
+    // THAT string (not the JS Date) for both the WHERE comparison and the
+    // emitted cursor. node-postgres hydrates `timestamp` into a JS Date, which
+    // only carries milliseconds -- so a Date-derived cursor silently truncates
+    // the column's microseconds and the `createdAt = :cAt` tiebreak branch
+    // could never match. Comparing text-to-timestamp keeps full precision.
+    const idQb = this.journalRepo
       .createQueryBuilder('journal')
-      .leftJoinAndSelect('journal.entries', 'entry')
+      .select('journal.id', 'id')
+      .addSelect(
+        `to_char(journal."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.US')`,
+        'cat',
+      )
       .where('journal.userId = :userId', { userId })
       .orderBy('journal.createdAt', 'DESC')
-      .take(limit + 1);
+      .addOrderBy('journal.id', 'DESC')
+      .limit(limit + 1);
 
-    if (cursor) {
-      qb.andWhere('journal.createdAt < :cursor', { cursor });
+    if (decodedCursor) {
+      idQb.andWhere(
+        '(journal."createdAt" < :cAt::timestamp OR (journal."createdAt" = :cAt::timestamp AND journal.id < :cId))',
+        { cAt: decodedCursor.createdAt, cId: decodedCursor.id },
+      );
     }
 
-    if (currency) {
-      qb.andWhere('entry.currency = :currency', {
-        currency: currency.toUpperCase(),
-      });
-    }
-
-    if (type) {
-      qb.andWhere('entry.type = :type', { type });
+    if (currency || type) {
+      idQb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM transaction_logs tl
+          WHERE tl."journalEntryId" = journal.id
+          ${currency ? 'AND tl.currency = :currency' : ''}
+          ${type ? 'AND tl.type = :type' : ''}
+        )`,
+        {
+          ...(currency ? { currency: currency.toUpperCase() } : {}),
+          ...(type ? { type } : {}),
+        },
+      );
     }
 
     if (purpose) {
-      qb.andWhere('journal.purpose = :purpose', { purpose });
+      idQb.andWhere('journal.purpose = :purpose', { purpose });
     }
 
-    const journals = await qb.getMany();
+    const rows: Array<{ id: string; cat: string }> = await idQb.getRawMany();
 
-    const hasNextPage = journals.length > limit;
-    const items = hasNextPage ? journals.slice(0, limit) : journals;
-    const nextCursor = hasNextPage
-      ? items[items.length - 1].createdAt.toISOString()
-      : null;
+    const hasNextPage = rows.length > limit;
+    const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
+    const lastRow = pageRows[pageRows.length - 1];
+    const nextCursor =
+      hasNextPage && lastRow
+        ? this.encodeCursor(lastRow.cat, lastRow.id)
+        : null;
+
+    // Step 2: hydrate the full journals (with their COMPLETE eager leg set --
+    // findBy honors `eager: true`, unlike the query builder). Re-impose the
+    // page order, since `In(...)` does not guarantee it.
+    const ids = pageRows.map((r) => r.id);
+    const items = ids.length
+      ? await this.journalRepo
+          .find({ where: { id: In(ids) } })
+          .then((found) => {
+            const byId = new Map(found.map((j) => [j.id, j]));
+            return ids.map((id) => byId.get(id)!).filter(Boolean);
+          })
+      : [];
 
     return {
       items,
       nextCursor,
       hasNextPage,
     };
+  }
+
+  /** Opaque, precision-safe keyset cursor: base64url("<microsecond-ts>|<id>"). */
+  private encodeCursor(createdAt: string, id: string): string {
+    return Buffer.from(`${createdAt}|${id}`, 'utf8').toString('base64url');
+  }
+
+  private decodeCursor(cursor: string): { createdAt: string; id: string } {
+    let decoded: string;
+    try {
+      decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+    } catch {
+      throw new BadRequestException('Invalid cursor');
+    }
+
+    const sep = decoded.indexOf('|');
+    if (sep === -1) {
+      throw new BadRequestException('Invalid cursor');
+    }
+
+    const createdAt = decoded.slice(0, sep);
+    const id = decoded.slice(sep + 1);
+    if (!createdAt || !id || Number.isNaN(Date.parse(createdAt))) {
+      throw new BadRequestException('Invalid cursor');
+    }
+
+    return { createdAt, id };
   }
 }

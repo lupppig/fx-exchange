@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsString, IsInt, Min, Max, IsUppercase, Length } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsInt,
+  Min,
+  Max,
+  IsUppercase,
+  Length,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsSupportedCurrency } from '../../common/constants/supported-currencies';
@@ -17,7 +25,8 @@ export class FundWalletDto {
 
   @ApiProperty({
     example: 100000,
-    description: 'Amount in smallest currency unit (e.g., kobo for NGN, cents for USD)',
+    description:
+      'Amount in smallest currency unit (e.g., kobo for NGN, cents for USD)',
     minimum: 1,
   })
   @Type(() => Number)

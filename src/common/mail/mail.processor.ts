@@ -33,7 +33,7 @@ export class MailProcessor extends WorkerHost {
 
   private async sendOtp(data: { email: string; otp: string }) {
     const { email, otp } = data;
-    
+
     if (this.configService.get('NODE_ENV') === 'development') {
       this.logger.log(`OTP for ${email}: ${otp}`);
     }
@@ -47,7 +47,10 @@ export class MailProcessor extends WorkerHost {
         html: `<p>Your verification code is: <b>${otp}</b>. It expires in 10 minutes.</p>`,
       });
     } catch (error) {
-      this.logger.error(`Failed to send OTP to ${email}`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `Failed to send OTP to ${email}`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw error;
     }
   }

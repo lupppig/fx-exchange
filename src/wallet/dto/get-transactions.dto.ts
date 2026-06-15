@@ -1,4 +1,4 @@
-import { IsOptional, IsInt, Min, Max, IsISO8601, IsEnum } from 'class-validator';
+import { IsOptional, IsInt, Min, Max, IsString, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsSupportedCurrency } from '../../common/constants/supported-currencies';
@@ -7,10 +7,11 @@ import { TransactionPurpose } from '../../transactions/enums/transaction-purpose
 
 export class GetTransactionsDto {
   @ApiPropertyOptional({
-    description: 'cursor timestamp pagination',
+    description:
+      'Opaque pagination cursor returned as `nextCursor` by a prior call',
   })
   @IsOptional()
-  @IsISO8601()
+  @IsString()
   cursor?: string;
 
   @ApiPropertyOptional({
@@ -29,12 +30,18 @@ export class GetTransactionsDto {
   @IsSupportedCurrency()
   currency?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by transaction type', enum: TransactionType })
+  @ApiPropertyOptional({
+    description: 'Filter by transaction type',
+    enum: TransactionType,
+  })
   @IsOptional()
   @IsEnum(TransactionType)
   type?: TransactionType;
 
-  @ApiPropertyOptional({ description: 'Filter by transaction purpose', enum: TransactionPurpose })
+  @ApiPropertyOptional({
+    description: 'Filter by transaction purpose',
+    enum: TransactionPurpose,
+  })
   @IsOptional()
   @IsEnum(TransactionPurpose)
   purpose?: TransactionPurpose;

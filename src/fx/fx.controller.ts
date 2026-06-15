@@ -1,12 +1,17 @@
 import { Body, Controller, Get, Post, Req } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { FxService, VersionedRates } from './fx.service';
 import { QuoteService, Quote } from './quote.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 
 interface AuthedRequest extends Request {
-  user?: { id: string; email?: string };
+  user?: { sub: string; email?: string };
 }
 
 @ApiTags('FX Rates')
@@ -21,7 +26,8 @@ export class FxController {
   @Get('rates')
   @ApiOperation({
     summary: 'Get current FX rates',
-    description: 'Returns supported FX pairs with current rates, versioned for conversion consistency.',
+    description:
+      'Returns supported FX pairs with current rates, versioned for conversion consistency.',
   })
   @ApiResponse({
     status: 200,
@@ -34,7 +40,10 @@ export class FxController {
         data: {
           type: 'object',
           properties: {
-            version: { type: 'string', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
+            version: {
+              type: 'string',
+              example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+            },
             base: { type: 'string', example: 'USD' },
             timestamp: { type: 'string', example: '2026-03-17T12:00:00.000Z' },
             rates: {
@@ -60,7 +69,7 @@ export class FxController {
     @Req() req: AuthedRequest,
     @Body() dto: CreateQuoteDto,
   ): Promise<Quote> {
-    const userId = req.user!.id;
+    const userId = req.user!.sub;
     return this.quoteService.createQuote({
       userId,
       fromCurrency: dto.fromCurrency,

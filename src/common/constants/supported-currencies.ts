@@ -5,13 +5,20 @@ import {
   ValidatorConstraintInterface,
 } from 'class-validator';
 
-/**
- * Canonical list of supported currencies.
- * Must stay in sync with SUBUNIT_FACTORS in currency.util.ts.
- */
+// Must stay in sync with SUBUNIT_FACTORS in currency.util.ts.
 export const SUPPORTED_CURRENCIES = [
-  'NGN', 'USD', 'EUR', 'GBP', 'CAD', 'AUD',
-  'CHF', 'JPY', 'CNY', 'ZAR', 'KES', 'GHS',
+  'NGN',
+  'USD',
+  'EUR',
+  'GBP',
+  'CAD',
+  'AUD',
+  'CHF',
+  'JPY',
+  'CNY',
+  'ZAR',
+  'KES',
+  'GHS',
 ] as const;
 
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
@@ -33,10 +40,6 @@ export class IsSupportedCurrencyConstraint implements ValidatorConstraintInterfa
   }
 }
 
-/**
- * Custom class-validator decorator.
- * Validates that a string field is a supported currency code.
- */
 export function IsSupportedCurrency(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
     registerDecorator({
