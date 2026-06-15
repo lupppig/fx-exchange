@@ -9,9 +9,9 @@ import {
   Unique,
   Check,
 } from 'typeorm';
-import { TransactionPurpose } from '../enums/transaction-purpose.enum.js';
-import { TransactionStatus } from '../enums/transaction-status.enum.js';
-import { TransactionLog } from './transaction-log.entity.js';
+import { TransactionPurpose } from '../enums/transaction-purpose.enum';
+import { TransactionStatus } from '../enums/transaction-status.enum';
+import { TransactionLog } from './transaction-log.entity';
 
 @Entity('journal_entries')
 @Unique(['userId', 'idempotencyKey'])
@@ -31,7 +31,11 @@ export class JournalEntry {
   @Index()
   purpose!: TransactionPurpose;
 
-  @Column({ type: 'enum', enum: TransactionStatus, default: TransactionStatus.PENDING })
+  @Column({
+    type: 'enum',
+    enum: TransactionStatus,
+    default: TransactionStatus.PENDING,
+  })
   status!: TransactionStatus;
 
   @Column({ nullable: false })
@@ -41,7 +45,10 @@ export class JournalEntry {
   @Check(`"exchangeRate" IS NULL OR "exchangeRate" > 0`)
   exchangeRate!: number | null;
 
-  @OneToMany(() => TransactionLog, (entry) => entry.journalEntry, { cascade: true, eager: true })
+  @OneToMany(() => TransactionLog, (entry) => entry.journalEntry, {
+    cascade: true,
+    eager: true,
+  })
   entries!: TransactionLog[];
 
   @CreateDateColumn()

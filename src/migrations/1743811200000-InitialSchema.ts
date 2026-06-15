@@ -27,7 +27,7 @@ export class InitialSchema1743811200000 implements MigrationInterface {
     await queryRunner.query(`
       CREATE TABLE "wallets" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
-        "userId" character varying NOT NULL,
+        "userId" uuid NOT NULL,
         "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
         "updatedAt" TIMESTAMP NOT NULL DEFAULT now(),
         CONSTRAINT "UQ_wallets_userId" UNIQUE ("userId"),
@@ -38,7 +38,7 @@ export class InitialSchema1743811200000 implements MigrationInterface {
     await queryRunner.query(`
       CREATE TABLE "balances" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
-        "walletId" character varying NOT NULL,
+        "walletId" uuid NOT NULL,
         "currency" character varying(3) NOT NULL,
         "amount" bigint NOT NULL DEFAULT '0',
         "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
@@ -72,8 +72,8 @@ export class InitialSchema1743811200000 implements MigrationInterface {
     await queryRunner.query(`
       CREATE TABLE "journal_entries" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
-        "walletId" character varying NOT NULL,
-        "userId" character varying NOT NULL,
+        "walletId" uuid NOT NULL,
+        "userId" uuid NOT NULL,
         "purpose" "public"."journal_entries_purpose_enum" NOT NULL,
         "status" "public"."journal_entries_status_enum" NOT NULL DEFAULT 'PENDING',
         "idempotencyKey" character varying NOT NULL,
@@ -110,8 +110,8 @@ export class InitialSchema1743811200000 implements MigrationInterface {
       CREATE TABLE "transaction_logs" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "journalEntryId" uuid NOT NULL,
-        "walletId" character varying NOT NULL,
-        "userId" character varying NOT NULL,
+        "walletId" uuid NOT NULL,
+        "userId" uuid NOT NULL,
         "type" "public"."transaction_logs_type_enum" NOT NULL,
         "currency" character varying(3) NOT NULL,
         "amount" bigint NOT NULL,

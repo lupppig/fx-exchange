@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import { IsSupportedCurrency } from '../../common/constants/supported-currencies.js';
+import { IsSupportedCurrency } from '../../common/constants/supported-currencies';
 
 @ValidatorConstraint({ name: 'tradeCurrenciesNotEqual', async: false })
 class CurrenciesNotEqual implements ValidatorConstraintInterface {
@@ -53,7 +53,8 @@ export class TradeDto {
 
   @ApiProperty({
     example: 5000,
-    description: 'Amount of fromCurrency in smallest unit (e.g., cents for USD, kobo for NGN)',
+    description:
+      'Amount of fromCurrency in smallest unit (e.g., cents for USD, kobo for NGN)',
     minimum: 1,
   })
   @Type(() => Number)

@@ -1,5 +1,5 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
-import { CorrelationIdMiddleware } from './correlation-id.middleware.js';
+import { CorrelationIdMiddleware } from './correlation-id.middleware';
 
 @Module({
   providers: [CorrelationIdMiddleware],

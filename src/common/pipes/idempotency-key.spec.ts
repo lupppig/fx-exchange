@@ -30,7 +30,9 @@ describe('IdempotencyKey validation logic', () => {
   });
 
   it('should trim whitespace', () => {
-    expect(validateIdempotencyKey('  key-with-spaces  ')).toBe('key-with-spaces');
+    expect(validateIdempotencyKey('  key-with-spaces  ')).toBe(
+      'key-with-spaces',
+    );
   });
 
   it('should accept a UUID', () => {
@@ -48,7 +50,9 @@ describe('IdempotencyKey validation logic', () => {
 
   it('should throw on null/undefined', () => {
     expect(() => validateIdempotencyKey(null)).toThrow(BadRequestException);
-    expect(() => validateIdempotencyKey(undefined)).toThrow(BadRequestException);
+    expect(() => validateIdempotencyKey(undefined)).toThrow(
+      BadRequestException,
+    );
   });
 
   it('should throw on non-string values', () => {

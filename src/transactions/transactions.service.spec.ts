@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository, QueryRunner } from 'typeorm';
-import { TransactionsService } from './transactions.service.js';
-import { TransactionLog } from './entities/transaction-log.entity.js';
-import { JournalEntry } from './entities/journal-entry.entity.js';
-import { TransactionType } from './enums/transaction-type.enum.js';
-import { TransactionPurpose } from './enums/transaction-purpose.enum.js';
-import { TransactionStatus } from './enums/transaction-status.enum.js';
-import { OutboxService } from '../common/outbox/outbox.service.js';
+import { TransactionsService } from './transactions.service';
+import { TransactionLog } from './entities/transaction-log.entity';
+import { JournalEntry } from './entities/journal-entry.entity';
+import { TransactionType } from './enums/transaction-type.enum';
+import { TransactionPurpose } from './enums/transaction-purpose.enum';
+import { TransactionStatus } from './enums/transaction-status.enum';
+import { OutboxService } from '../common/outbox/outbox.service';
 
 describe('TransactionsService', () => {
   let service: TransactionsService;
@@ -54,6 +54,7 @@ describe('TransactionsService', () => {
           provide: getRepositoryToken(JournalEntry),
           useValue: {
             findOne: jest.fn(),
+            find: jest.fn(),
             createQueryBuilder: jest.fn(),
           },
         },
@@ -211,24 +212,34 @@ describe('TransactionsService', () => {
 
   describe('getTransactions', () => {
     it('should fetch journal entries using query builder', async () => {
+      const mockRows = [{ id: '1', cat: '2026-06-06T00:00:00.000000' }];
       const mockJournals = [{ id: '1', createdAt: new Date(), entries: [] }];
       const mockQueryBuilder = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue(mockJournals),
+        addOrderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(mockRows),
       };
 
       jest
         .spyOn(journalRepo, 'createQueryBuilder')
         .mockReturnValue(mockQueryBuilder as any);
+      jest.spyOn(journalRepo, 'find').mockResolvedValue(mockJournals as any);
 
       const result = await service.getTransactions('u1', { limit: 10 });
 
       expect(result.items).toBeDefined();
       expect(journalRepo.createQueryBuilder).toHaveBeenCalled();
+    });
+
+    it('rejects a malformed (non-base64-keyset) cursor', async () => {
+      await expect(
+        service.getTransactions('u1', { limit: 10, cursor: 'not-a-cursor' }),
+      ).rejects.toThrow('Invalid cursor');
     });
   });
 });

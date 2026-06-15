@@ -2,17 +2,19 @@ import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { WalletService } from './wallet.service.js';
-import { WalletController } from './wallet.controller.js';
-import { Wallet } from './entities/wallet.entity.js';
-import { Balance } from './entities/balance.entity.js';
-import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
-import { FxModule } from '../fx/fx.module.js';
-import { TransactionsModule } from '../transactions/transactions.module.js';
+import { WalletService } from './wallet.service';
+import { WalletController } from './wallet.controller';
+import { HouseAccountService } from './house-account.service';
+import { Wallet } from './entities/wallet.entity';
+import { Balance } from './entities/balance.entity';
+import { Order } from './entities/order.entity';
+import { AuthMiddleware } from '../auth/middleware/auth.middleware';
+import { FxModule } from '../fx/fx.module';
+import { TransactionsModule } from '../transactions/transactions.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Wallet, Balance]),
+    TypeOrmModule.forFeature([Wallet, Balance, Order]),
     FxModule,
     TransactionsModule,
     JwtModule.registerAsync({
@@ -24,8 +26,8 @@ import { TransactionsModule } from '../transactions/transactions.module.js';
     }),
   ],
   controllers: [WalletController],
-  providers: [WalletService],
-  exports: [WalletService],
+  providers: [WalletService, HouseAccountService],
+  exports: [WalletService, HouseAccountService],
 })
 export class WalletModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

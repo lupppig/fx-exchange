@@ -1,4 +1,4 @@
-import { TransformInterceptor } from './transform.interceptor.js';
+import { TransformInterceptor } from './transform.interceptor';
 import { of, lastValueFrom } from 'rxjs';
 
 describe('TransformInterceptor', () => {

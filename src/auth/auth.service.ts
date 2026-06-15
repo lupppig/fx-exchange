@@ -4,11 +4,11 @@ import { Redis } from 'ioredis';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { UsersService } from '../users/users.service.js';
-import { RegisterDto } from './dto/register.dto.js';
-import { VerifyOtpDto } from './dto/verify-otp.dto.js';
-import { SigninDto } from './dto/signin.dto.js';
-import { MailService } from '../common/mail/mail.service.js';
+import { UsersService } from '../users/users.service';
+import { RegisterDto } from './dto/register.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { SigninDto } from './dto/signin.dto';
+import { MailService } from '../common/mail/mail.service';
 
 @Injectable()
 export class AuthService {

@@ -3,9 +3,10 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { FxService } from './fx.service.js';
-import { FxController } from './fx.controller.js';
-import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
+import { FxService } from './fx.service';
+import { FxController } from './fx.controller';
+import { QuoteService } from './quote.service';
+import { AuthMiddleware } from '../auth/middleware/auth.middleware';
 
 @Module({
   imports: [
@@ -21,8 +22,8 @@ import { AuthMiddleware } from '../auth/middleware/auth.middleware.js';
     }),
   ],
   controllers: [FxController],
-  providers: [FxService],
-  exports: [FxService],
+  providers: [FxService, QuoteService],
+  exports: [FxService, QuoteService],
 })
 export class FxModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

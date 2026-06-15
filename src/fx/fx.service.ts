@@ -1,4 +1,8 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { InjectRedis } from '@nestjs-modules/ioredis';
@@ -40,8 +44,14 @@ export class FxService {
   ) {
     this.apiKey = this.configService.get<string>('EXCHANGE_RATE_API_KEY', '');
     this.maxRetries = this.configService.get<number>('FX_RETRY_MAX', 3);
-    this.baseDelayMs = this.configService.get<number>('FX_RETRY_BASE_DELAY_MS', 300);
-    this.requestTimeoutMs = this.configService.get<number>('FX_REQUEST_TIMEOUT_MS', 5000);
+    this.baseDelayMs = this.configService.get<number>(
+      'FX_RETRY_BASE_DELAY_MS',
+      300,
+    );
+    this.requestTimeoutMs = this.configService.get<number>(
+      'FX_REQUEST_TIMEOUT_MS',
+      5000,
+    );
 
     this.configureRetry();
   }
@@ -66,8 +76,11 @@ export class FxService {
     axiosRetry(this.httpService.axiosRef, {
       retries: this.maxRetries,
       retryDelay: (retryCount) => {
-        // exponentialDelay already applies jitter internally
-        return axiosRetry.exponentialDelay(retryCount, undefined, this.baseDelayMs);
+        return axiosRetry.exponentialDelay(
+          retryCount,
+          undefined,
+          this.baseDelayMs,
+        );
       },
       retryCondition: (error) => {
         return (
@@ -77,20 +90,19 @@ export class FxService {
         );
       },
       onRetry: (retryCount, error, requestConfig) => {
-        // Escalate timeout: double it for each retry attempt
         requestConfig.timeout = baseTimeout * Math.pow(2, retryCount);
 
         this.logger.warn(
           `FX API retry ${retryCount}/${this.maxRetries} — ` +
-          `error: ${error.message} | ` +
-          `next timeout: ${requestConfig.timeout}ms`,
+            `error: ${error.message} | ` +
+            `next timeout: ${requestConfig.timeout}ms`,
         );
       },
     });
 
     this.logger.log(
       `FX retry configured: maxRetries=${this.maxRetries}, ` +
-      `baseDelay=${this.baseDelayMs}ms, timeout=${this.requestTimeoutMs}ms`,
+        `baseDelay=${this.baseDelayMs}ms, timeout=${this.requestTimeoutMs}ms`,
     );
   }
 
@@ -107,7 +119,9 @@ export class FxService {
     try {
       const url = `https://v6.exchangerate-api.com/v6/${this.apiKey}/latest/NGN`;
       const { data } = await firstValueFrom(
-        this.httpService.get<FxRateResponse>(url, { timeout: this.requestTimeoutMs }),
+        this.httpService.get<FxRateResponse>(url, {
+          timeout: this.requestTimeoutMs,
+        }),
       );
 
       if (data.result !== 'success') {
@@ -147,4 +161,3 @@ export class FxService {
     );
   }
 }
-

@@ -6,13 +6,19 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
-import { WalletService } from './wallet.service.js';
-import { FundWalletDto } from './dto/fund-wallet.dto.js';
-import { ConvertDto } from './dto/convert.dto.js';
-import { TradeDto } from './dto/trade.dto.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
-import { IdempotencyKey } from '../common/pipes/parse-idempotency-key.pipe.js';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiHeader,
+} from '@nestjs/swagger';
+import { WalletService } from './wallet.service';
+import { FundWalletDto } from './dto/fund-wallet.dto';
+import { ConvertDto } from './dto/convert.dto';
+import { ExecuteTradeDto } from './dto/execute-trade.dto';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { IdempotencyKey } from '../common/pipes/parse-idempotency-key.pipe';
 
 @ApiTags('Wallet')
 @ApiBearerAuth()
@@ -24,9 +30,13 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get wallet balances',
-    description: 'Returns the authenticated user wallet with all currency balances.',
+    description:
+      'Returns the authenticated user wallet with all currency balances.',
   })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Wallet retrieved successfully.' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Wallet retrieved successfully.',
+  })
   async getWallet(@CurrentUser('sub') userId: string) {
     return this.walletService.getWallet(userId);
   }
@@ -35,15 +45,16 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Fund wallet',
-    description: 'Credits the wallet with the specified currency and amount (in smallest unit, e.g., kobo). Requires an idempotency key header.',
+    description:
+      'Credits the wallet with the specified currency and amount (in smallest unit, e.g., kobo). Requires an idempotency key header.',
   })
   @ApiHeader({
     name: 'x-idempotency-key',
     description: 'Unique key to prevent duplicate transactions',
     required: true,
   })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
+  @ApiResponse({
+    status: HttpStatus.OK,
     description: 'Wallet funded successfully.',
     schema: {
       type: 'object',
@@ -54,28 +65,37 @@ export class WalletController {
       },
     },
   })
-  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid request or funding failure.' })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid request or funding failure.',
+  })
   async fundWallet(
     @CurrentUser('sub') userId: string,
     @IdempotencyKey() idempotencyKey: string,
     @Body() dto: FundWalletDto,
   ) {
-    return this.walletService.fundWallet(userId, dto.currency, dto.amount, idempotencyKey);
+    return this.walletService.fundWallet(
+      userId,
+      dto.currency,
+      dto.amount,
+      idempotencyKey,
+    );
   }
 
   @Post('convert')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Convert currency',
-    description: 'Converts funds from one currency to another using real-time FX rates. Amount in smallest unit.',
+    description:
+      'Converts funds from one currency to another using real-time FX rates. Amount in smallest unit.',
   })
   @ApiHeader({
     name: 'x-idempotency-key',
     description: 'Unique key to prevent duplicate conversions',
     required: true,
   })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
+  @ApiResponse({
+    status: HttpStatus.OK,
     description: 'Currency converted successfully.',
     schema: {
       type: 'object',
@@ -91,7 +111,8 @@ export class WalletController {
   })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Insufficient balance, invalid currency pair, or amount too small.',
+    description:
+      'Insufficient balance, invalid currency pair, or amount too small.',
     schema: {
       type: 'object',
       properties: {
@@ -128,63 +149,27 @@ export class WalletController {
   @Post('trade')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Trade currency',
-    description: 'Trade Naira ↔ other currency using real-time FX rates. Amount in smallest unit.',
+    summary: 'Execute a previously-issued FX quote',
+    description:
+      'Trades at the rate locked in the quote. The quote must belong to the caller, not be expired, and not have been used.',
   })
-  @ApiHeader({
-    name: 'x-idempotency-key',
-    description: 'Unique key to prevent duplicate trades',
-    required: true,
-  })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
+  @ApiResponse({
+    status: HttpStatus.OK,
     description: 'Trade executed successfully.',
-    schema: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', example: 'Conversion successful' },
-        status: { type: 'string', example: 'SUCCESS' },
-        rateVersion: { type: 'string' },
-        exchangeRate: { type: 'number' },
-        debit: { type: 'object' },
-        credit: { type: 'object' },
-      },
-    },
   })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Insufficient balance, invalid currency pair, or amount too small.',
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', example: false },
-        statusCode: { type: 'number', example: 400 },
-        message: { type: 'string', example: 'Insufficient USD balance' },
-        error: { type: 'string', example: 'INSUFFICIENT_BALANCE' },
-        details: {
-          type: 'object',
-          properties: {
-            currency: { type: 'string', example: 'USD' },
-            available: { type: 'number', example: 100000 },
-            requested: { type: 'number', example: 200000 },
-            shortfall: { type: 'number', example: 100000 },
-          },
-        },
-      },
-    },
+    description:
+      'Quote expired/unknown/already used, insufficient balance, or rejected.',
   })
   async trade(
     @CurrentUser('sub') userId: string,
-    @IdempotencyKey() idempotencyKey: string,
-    @Body() dto: TradeDto,
+    @Body() dto: ExecuteTradeDto,
   ) {
-    return this.walletService.tradeFunds(
+    return this.walletService.executeTrade(
       userId,
-      dto.fromCurrency,
-      dto.toCurrency,
-      dto.amount,
-      idempotencyKey,
+      dto.quoteId,
+      dto.idempotencyKey,
     );
   }
-
 }

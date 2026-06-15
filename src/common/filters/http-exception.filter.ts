@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import { CORRELATION_ID_HEADER } from '../logging/correlation-id.middleware.js';
+import { CORRELATION_ID_HEADER } from '../logging/correlation-id.middleware';
 
 const SENSITIVE_FIELDS = new Set([
   'password',

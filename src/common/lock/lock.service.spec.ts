@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { InternalServerErrorException } from '@nestjs/common';
-import { LockService } from './lock.service.js';
+import { LockService } from './lock.service';
 import { Lock } from 'redlock';
 
 describe('LockService', () => {

@@ -10,8 +10,8 @@ import {
   Check,
 } from 'typeorm';
 import { Expose, Exclude } from 'class-transformer';
-import { Wallet } from './wallet.entity.js';
-import { getSubunitFactor } from '../utils/currency.util.js';
+import { Wallet } from './wallet.entity';
+import { getSubunitFactor } from '../utils/currency.util';
 
 @Entity('balances')
 @Unique(['walletId', 'currency'])

@@ -1,8 +1,8 @@
 import { Module, Global } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 
-import { MailProcessor } from './mail.processor.js';
-import { MailService } from './mail.service.js';
+import { MailProcessor } from './mail.processor';
+import { MailService } from './mail.service';
 
 @Global()
 @Module({
