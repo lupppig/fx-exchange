@@ -32,9 +32,13 @@ describe('OutboxService', () => {
 
   describe('claimPendingEntries', () => {
     it('issues an UPDATE ... FOR UPDATE SKIP LOCKED against PENDING rows', async () => {
+      // pg driver returns [rows, affectedCount] on UPDATE ... RETURNING
       queryMock.mockResolvedValueOnce([
-        { id: 'a', status: OutboxStatus.PROCESSING },
-        { id: 'b', status: OutboxStatus.PROCESSING },
+        [
+          { id: 'a', status: OutboxStatus.PROCESSING },
+          { id: 'b', status: OutboxStatus.PROCESSING },
+        ],
+        2,
       ]);
 
       const claimed = await service.claimPendingEntries(50);
@@ -56,8 +60,8 @@ describe('OutboxService', () => {
       // FOR UPDATE SKIP LOCKED in Postgres provides this guarantee, and
       // the test asserts the service surfaces whatever the DB returns.
       queryMock
-        .mockResolvedValueOnce([{ id: 'a' }])
-        .mockResolvedValueOnce([{ id: 'b' }]);
+        .mockResolvedValueOnce([[{ id: 'a' }], 1])
+        .mockResolvedValueOnce([[{ id: 'b' }], 1]);
 
       const [first, second] = await Promise.all([
         service.claimPendingEntries(10),

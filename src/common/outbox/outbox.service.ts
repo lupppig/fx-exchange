@@ -35,7 +35,9 @@ export class OutboxService {
    * markPublished / markFailed each one.
    */
   async claimPendingEntries(limit: number): Promise<OutboxEntry[]> {
-    const rows: OutboxEntry[] = await this.outboxRepo.query(
+    // pg driver: an UPDATE ... RETURNING comes back as [rows, affected].
+    // Unwrap to the row array (mirrors recoverStuckEntries' normalisation).
+    const result: [OutboxEntry[], number] = await this.outboxRepo.query(
       `
       UPDATE outbox_entries
          SET status = $1, "claimedAt" = now(), "updatedAt" = now()
@@ -51,7 +53,7 @@ export class OutboxService {
       [OutboxStatus.PROCESSING, OutboxStatus.PENDING, limit],
     );
 
-    return rows;
+    return result[0];
   }
 
   /**
