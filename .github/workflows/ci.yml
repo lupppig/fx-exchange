@@ -68,6 +68,24 @@ jobs:
           JWT_SECRET: ci-test-secret-key
           NODE_ENV: test
 
+      - name: Run e2e tests
+        run: npm run test:e2e -- --runInBand
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fx_exchange_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-test-secret-key
+          NODE_ENV: test
+          # The suite mocks MailService and FxService, so these only need to
+          # satisfy the Joi env schema -- they are never used to reach a real
+          # provider. OUTBOX poll is slowed so the broker-less DLQ path stays quiet.
+          MAIL_HOST: smtp.test
+          MAIL_PORT: '587'
+          MAIL_USER: ci
+          MAIL_PASS: ci
+          MAIL_FROM: ci@test.local
+          EXCHANGE_RATE_API_KEY: ci-test-key
+          OUTBOX_POLL_INTERVAL_MS: '3600000'
+
       - name: Upload coverage reports
         uses: codecov/codecov-action@v5
         if: always()

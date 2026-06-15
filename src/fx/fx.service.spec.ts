@@ -30,14 +30,20 @@ describe('FxService', () => {
           provide: HttpService,
           useValue: {
             get: jest.fn(),
-            axiosRef: { interceptors: { request: { use: jest.fn() }, response: { use: jest.fn() } } },
+            axiosRef: {
+              interceptors: {
+                request: { use: jest.fn() },
+                response: { use: jest.fn() },
+              },
+            },
           },
         },
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, fallback?: unknown) =>
-              ENV_DEFAULTS[key] ?? fallback,
+            get: jest.fn(
+              (key: string, fallback?: unknown) =>
+                ENV_DEFAULTS[key] ?? fallback,
             ),
           },
         },
@@ -49,7 +55,7 @@ describe('FxService', () => {
     }).compile();
 
     service = module.get<FxService>(FxService);
-    httpService = module.get(HttpService) as jest.Mocked<HttpService>;
+    httpService = module.get(HttpService);
   });
 
   it('should return cached rates on cache hit', async () => {
@@ -97,16 +103,14 @@ describe('FxService', () => {
   });
 
   it('should fall back to last known rates when API fails', async () => {
-    redisClient.get
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(
-        JSON.stringify({
-          version: 'fallback-v1',
-          base: 'USD',
-          timestamp: '2026-03-16T00:00:00.000Z',
-          rates: { USD: 1, NGN: 1550 },
-        }),
-      );
+    redisClient.get.mockResolvedValueOnce(null).mockResolvedValueOnce(
+      JSON.stringify({
+        version: 'fallback-v1',
+        base: 'USD',
+        timestamp: '2026-03-16T00:00:00.000Z',
+        rates: { USD: 1, NGN: 1550 },
+      }),
+    );
 
     httpService.get.mockReturnValue(
       throwError(() => new Error('Network error')),
@@ -125,6 +129,8 @@ describe('FxService', () => {
       throwError(() => new Error('Network error')),
     );
 
-    await expect(service.getRates()).rejects.toThrow(InternalServerErrorException);
+    await expect(service.getRates()).rejects.toThrow(
+      InternalServerErrorException,
+    );
   });
 });

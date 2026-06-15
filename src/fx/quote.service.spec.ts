@@ -6,7 +6,12 @@ import { FxService } from './fx.service';
 
 describe('QuoteService', () => {
   let service: QuoteService;
-  let redis: { set: jest.Mock; get: jest.Mock; del: jest.Mock; getdel: jest.Mock };
+  let redis: {
+    set: jest.Mock;
+    get: jest.Mock;
+    del: jest.Mock;
+    getdel: jest.Mock;
+  };
   let fx: { getRates: jest.Mock };
   let storedQuote: string | undefined;
 
@@ -156,7 +161,7 @@ describe('QuoteService', () => {
     expect(second).toBeNull();
   });
 
-  it('consumeQuote: rejects wrong user without leaking the quote', async () => {
+  it('consumeQuote: rejects wrong user and preserves the quote for its owner', async () => {
     const q = await service.createQuote({
       userId: 'u1',
       fromCurrency: 'NGN',
@@ -164,15 +169,18 @@ describe('QuoteService', () => {
       amountInSubunits: 1_000_000n,
     });
 
+    // A non-owner attempt is rejected...
     const stolen = await service.consumeQuote(q.id, 'u2');
     expect(stolen).toBeNull();
 
-    // GETDEL already burned the key -- second call by the legit user
-    // also returns null. This is the right behavior: a hostile lookup
-    // permanently invalidates the quote, which is a small but real
-    // DOS surface. Document, accept, and move on -- real-world quotes
-    // are short-lived and re-requested cheaply.
+    // ...and must NOT burn the quote: GETDEL removed it, but consumeQuote
+    // re-stores it on user mismatch so the legitimate owner can still redeem.
+    // (Closes the cross-user DOS where guessing an id invalidated a quote.)
     const legit = await service.consumeQuote(q.id, 'u1');
-    expect(legit).toBeNull();
+    expect(legit?.id).toBe(q.id);
+
+    // Single-use still holds for the owner.
+    const again = await service.consumeQuote(q.id, 'u1');
+    expect(again).toBeNull();
   });
 });

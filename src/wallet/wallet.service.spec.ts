@@ -126,14 +126,12 @@ describe('WalletService', () => {
             // currency the caller asks for. Tests that care about the
             // house leg override this per-test.
             getId: jest.fn().mockReturnValue('house-wallet-id'),
-            lockBalance: jest
-              .fn()
-              .mockImplementation((_qr, ccy: string) => ({
-                id: `house-balance-${ccy}`,
-                walletId: 'house-wallet-id',
-                currency: ccy,
-                amount: '9000000000000000',
-              })),
+            lockBalance: jest.fn().mockImplementation((_qr, ccy: string) => ({
+              id: `house-balance-${ccy}`,
+              walletId: 'house-wallet-id',
+              currency: ccy,
+              amount: '9000000000000000',
+            })),
           },
         },
       ],
